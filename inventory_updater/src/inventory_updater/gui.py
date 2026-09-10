@@ -267,9 +267,9 @@ class CredentialsDialog(QDialog):
 
     def _load_current(self) -> None:
         creds = load_credentials()
-        self.user_input.setText(creds["username"])
-        self.pass_input.setText(creds["password"])
-        self.acc_input.setText(creds["account_number"])
+        self.user_input.setText(creds.get("username", ""))
+        self.pass_input.setText(creds.get("password", ""))
+        self.acc_input.setText(creds.get("account_number", ""))
 
     def _on_test_connection(self) -> None:
         user = self.user_input.text().strip()
@@ -318,6 +318,8 @@ class CredentialsDialog(QDialog):
             os.environ["MARCONE_PASSWORD"] = pwd
             if acc:
                 os.environ["MARCONE_ACCOUNT_NUMBER"] = acc
+
+        self.accept()
 
 
 class FileDropArea(QFrame):

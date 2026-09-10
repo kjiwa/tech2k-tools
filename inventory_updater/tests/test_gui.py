@@ -8,12 +8,13 @@ import pytest
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 from inventory_updater.gui import (
+    CredentialsDialog,
     FileDropArea,
     MainWindow,
     UpdateWorker,
 )
 from inventory_updater.updater import RowUpdateResult, UpdateStats
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QDialog
 
 
 @pytest.fixture(scope="session")
@@ -225,3 +226,41 @@ def test_main_window_concurrency_options(qapp, test_excel_file):
             pytest.approx(mock_worker_cls.call_args.kwargs["throttle_seconds"]) == 0.45
         )
         assert mock_worker_cls.call_args.kwargs["cache_chunk_size"] == 250
+
+
+def test_credentials_dialog_save_and_accept(qapp):
+    with patch("inventory_updater.gui.save_credentials") as mock_save:
+        dlg = CredentialsDialog()
+        dlg.user_input.setText("myuser")
+        dlg.pass_input.setText("mypass")
+        dlg.acc_input.setText("12345")
+        dlg.remember_cb.setChecked(True)
+
+        dlg._on_save()
+
+        mock_save.assert_called_once_with("myuser", "mypass", "12345")
+        assert dlg.result() == QDialog.DialogCode.Accepted
+
+
+def test_main_window_open_credentials_updates_chip_and_start_btn(qapp, test_excel_file):
+    current_creds = {"username": "", "password": "", "account_number": ""}
+
+    with patch(
+        "inventory_updater.gui.load_credentials",
+        side_effect=lambda: current_creds,
+    ):
+        window = MainWindow()
+        window.selected_file_path = test_excel_file
+        assert "Not configured" in window.conn_chip.text()
+        assert window.start_btn.isEnabled() is False
+
+        def mock_exec(self):
+            current_creds["username"] = "newuser"
+            current_creds["password"] = "newpassword"
+            return QDialog.DialogCode.Accepted
+
+        with patch("inventory_updater.gui.CredentialsDialog.exec", mock_exec):
+            window._open_credentials()
+
+        assert "Marcone: newuser" in window.conn_chip.text()
+        assert window.start_btn.isEnabled() is True
