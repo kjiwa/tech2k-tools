@@ -102,11 +102,13 @@ class InventoryUpdater:
         cache: PriceCache | None = None,
         cache_ttl_seconds: float = 86400 * 7,
         workers: int = 3,
+        cache_chunk_size: int = 500,
     ) -> None:
         self.client = client
-        self.cache = cache or PriceCache()
+        self.cache = cache or PriceCache(chunk_size=cache_chunk_size)
         self.cache_ttl = cache_ttl_seconds
         self.workers = workers
+        self.cache_chunk_size = cache_chunk_size
 
     @staticmethod
     def _matches_supplier_filter(
@@ -153,7 +155,9 @@ class InventoryUpdater:
             for r in rows
         ]
         cached_map, missing_set = self.cache.get_many(
-            candidate_parts, max_age_seconds=self.cache_ttl
+            candidate_parts,
+            max_age_seconds=self.cache_ttl,
+            chunk_size=self.cache_chunk_size,
         )
         resolved_pricing: dict[str, tuple[PartPricing | None, Exception | None]] = {}
         for p, pricing in cached_map.items():
@@ -188,13 +192,27 @@ class InventoryUpdater:
                 else None
             )
             c_supplier = str(s_cell.value or "").strip() if s_cell else ""
-            if not self._matches_supplier_filter(c_supplier, supplier_filter, allow_blank_supplier):
+            if not self._matches_supplier_filter(
+                c_supplier, supplier_filter, allow_blank_supplier
+            ):
                 continue
 
             if only_missing:
-                c_cell = sheet.cell(row=r_idx, column=col_map["cost"]) if "cost" in col_map else None
-                ac_cell = sheet.cell(row=r_idx, column=col_map["avg_cost"]) if "avg_cost" in col_map else None
-                pr_cell = sheet.cell(row=r_idx, column=col_map["price"]) if "price" in col_map else None
+                c_cell = (
+                    sheet.cell(row=r_idx, column=col_map["cost"])
+                    if "cost" in col_map
+                    else None
+                )
+                ac_cell = (
+                    sheet.cell(row=r_idx, column=col_map["avg_cost"])
+                    if "avg_cost" in col_map
+                    else None
+                )
+                pr_cell = (
+                    sheet.cell(row=r_idx, column=col_map["price"])
+                    if "price" in col_map
+                    else None
+                )
                 if self._check_already_populated(field, c_cell, ac_cell, pr_cell):
                     continue
 
@@ -262,7 +280,9 @@ class InventoryUpdater:
         self,
         clean_part: str,
         resolved_pricing: dict[str, tuple[PartPricing | None, Exception | None]],
-        futures: dict[str, concurrent.futures.Future[tuple[PartPricing | None, Exception | None]]],
+        futures: dict[
+            str, concurrent.futures.Future[tuple[PartPricing | None, Exception | None]]
+        ],
         uncached_index_map: dict[str, int],
         ensure_submitted: Callable[[int], None],
         lookahead_window: int,
@@ -306,6 +326,7 @@ class InventoryUpdater:
         row_cb: Callable[[RowUpdateResult], None] | None = None,
         cancel_check: Callable[[], bool] | None = None,
         workers: int | None = None,
+        lookahead: int | None = None,
     ) -> UpdateStats:
         """Process an Excel inventory file and update prices."""
         concurrency = max(1, self.workers if workers is None else workers)
@@ -348,7 +369,9 @@ class InventoryUpdater:
         ] = {}
         uncached_index_map = {p: i for i, p in enumerate(uncached_parts)}
         next_submit_idx = 0
-        lookahead_window = max(concurrency * 3, 10)
+        lookahead_window = (
+            max(concurrency * 3, 10) if lookahead is None else max(1, lookahead)
+        )
 
         def ensure_submitted(target_idx: int) -> None:
             nonlocal next_submit_idx
@@ -398,7 +421,9 @@ class InventoryUpdater:
                 str(supplier_cell.value or "").strip() if supplier_cell else ""
             )
 
-            if not self._matches_supplier_filter(current_supplier, supplier_filter, allow_blank_supplier):
+            if not self._matches_supplier_filter(
+                current_supplier, supplier_filter, allow_blank_supplier
+            ):
                 stats.skipped += 1
                 if row_cb:
                     row_cb(
@@ -435,7 +460,9 @@ class InventoryUpdater:
             orig_price = _parse_float(price_cell.value if price_cell else None)
 
             if only_missing:
-                already_pop_msg = self._check_already_populated(field, cost_cell, avg_cost_cell, price_cell)
+                already_pop_msg = self._check_already_populated(
+                    field, cost_cell, avg_cost_cell, price_cell
+                )
                 if already_pop_msg:
                     stats.skipped += 1
                     if row_cb:

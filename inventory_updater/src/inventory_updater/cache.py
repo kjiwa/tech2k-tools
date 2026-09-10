@@ -81,8 +81,9 @@ def _row_to_pricing(
 class PriceCache:
     """SQLite-backed cache for Marcone part lookups."""
 
-    def __init__(self, db_path: str | None = None) -> None:
+    def __init__(self, db_path: str | None = None, chunk_size: int = 500) -> None:
         self.db_path = db_path or get_default_cache_path()
+        self.chunk_size = chunk_size
         self._write_lock = threading.Lock()
         self._init_db()
 
@@ -158,7 +159,10 @@ class PriceCache:
         )
 
     def get_many(
-        self, part_numbers: list[str], max_age_seconds: float | None = None
+        self,
+        part_numbers: list[str],
+        max_age_seconds: float | None = None,
+        chunk_size: int | None = None,
     ) -> tuple[dict[str, PartPricing], set[str]]:
         """Batch retrieve cached pricing and known missing parts.
 
@@ -167,7 +171,9 @@ class PriceCache:
         marked not_found within TTL.
         """
         clean_parts = list(
-            dict.fromkeys(p.strip().upper() for p in part_numbers if p and str(p).strip())
+            dict.fromkeys(
+                p.strip().upper() for p in part_numbers if p and str(p).strip()
+            )
         )
         if not clean_parts:
             return {}, set()
@@ -175,12 +181,12 @@ class PriceCache:
         cached_map: dict[str, PartPricing] = {}
         missing_set: set[str] = set()
         now = datetime.now(timezone.utc)
-        chunk_size = 500
+        step = max(1, chunk_size or self.chunk_size)
 
         with self._get_connection() as conn:
             cur = conn.cursor()
-            for i in range(0, len(clean_parts), chunk_size):
-                chunk = clean_parts[i : i + chunk_size]
+            for i in range(0, len(clean_parts), step):
+                chunk = clean_parts[i : i + step]
                 placeholders = ",".join("?" for _ in chunk)
                 cur.execute(
                     f"""
@@ -297,4 +303,6 @@ class PriceCache:
             return False
 
         status, updated_at_str = row
-        return status == "not_found" and not _is_expired(updated_at_str, max_age_seconds)
+        return status == "not_found" and not _is_expired(
+            updated_at_str, max_age_seconds
+        )

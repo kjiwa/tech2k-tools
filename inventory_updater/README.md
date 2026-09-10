@@ -41,12 +41,15 @@ Launch the graphical interface:
 uv run inventory-updater-gui
 ```
 
+![Tech 2000 Inventory Price Updater](docs/gui_screenshot.png)
+
 ### Features
 
 - Drag-and-drop spreadsheet loading or system file picker.
 - Automatic column detection for Part Number, Cost, Price, and Supplier headers.
 - Update scope selection: Cost and List Price, Customer Cost Only, or List Price Only.
 - Supplier filtering by substring match, plus toggle for blank supplier values.
+- Real-time concurrency, request throttling, and SQLite batch query controls.
 - Dry run simulation mode and row processing limits.
 - Real-time row status streaming table displaying live lookups, updated costs, and list prices.
 - Cooperative cancellation without leaving incomplete or corrupt workbooks.
@@ -76,6 +79,9 @@ Default behavior reads `Service Fusion Inventory.xlsx` from the current director
 | `--dry-run` | Query prices and report statistics without writing files | `false` |
 | `--limit N` | Process at most N matching rows | None |
 | `--workers, -w N` | Concurrent lookup threads | `3` |
+| `--throttle, --throttle-seconds SEC` | Minimum delay between HTTP requests across threads | `0.2` |
+| `--cache-chunk-size, --batch-size N` | Item batch size for SQLite cache lookups | `500` |
+| `--lookahead N` | Worker pipeline submission lookahead window | `max(workers * 3, 10)` |
 | `--cache-file PATH` | SQLite database file for price cache | `.cache/marcone_prices.sqlite` |
 | `--cache-ttl-days DAYS` | Cache entry lifetime in days | `7.0` |
 | `--username USER` | Marcone username override | `MARCONE_USERNAME` |
@@ -91,10 +97,10 @@ Preview pricing lookups for the first 5 parts:
 uv run inventory-updater --dry-run --limit 5
 ```
 
-Update an inventory spreadsheet in place using 5 concurrent workers:
+Update an inventory spreadsheet in place using 5 concurrent workers and 0.3s request throttle:
 
 ```sh
-uv run inventory-updater --file InventoryItems.xlsx --in-place --workers 5
+uv run inventory-updater --file InventoryItems.xlsx --in-place --workers 5 --throttle 0.3
 ```
 
 Update only blank or zero costs and prices for Marcone rows:
@@ -108,6 +114,25 @@ Assign supplier name to Marcone on all updated rows and write to a new file:
 ```sh
 uv run inventory-updater --set-supplier Marcone -o output.xlsx
 ```
+
+## Performance & Tuning Guidance
+
+### Default Rationales
+
+- **`workers: 3`**: Marcone serves session-authenticated web portal pages. Running 3 concurrent threads yields roughly 2.5x to 3x speedup compared to serial lookups without triggering anti-bot protections or concurrent session invalidation.
+- **`throttle_seconds: 0.2`**: Cross-thread throttle lock enforces a minimum 200 ms interval between any outgoing HTTP calls. This caps total request rate to at most ~5 requests/sec across all workers, smoothing traffic spikes.
+- **`cache_chunk_size: 500`**: Prior to executing live web requests, all candidate row part numbers are checked against local SQLite cache in chunks of 500 items. This avoids SQL variable expression limits while pre-resolving thousands of parts in single-digit milliseconds.
+- **`lookahead: max(workers * 3, 10)`**: Limits how far ahead in the spreadsheet the worker pipeline queues uncached lookups. Keeps worker threads saturated without buffering excessive unwritten state in memory.
+
+### Tuning Strategies
+
+| Scenario | Recommended Setting | Rationale |
+| --- | --- | --- |
+| Default / Standard sync | `--workers 3 --throttle 0.2` | Balanced throughput and safe request rates. |
+| Large catalogs (>5,000 items) on stable connection | `--workers 5 --throttle 0.15` | Accelerates throughput; monitor for portal rate limits. |
+| Encountering HTTP 429 or portal connection errors | `--workers 2 --throttle 0.5` | Reduces request frequency and backoff pressure on Marcone. |
+| Slow or memory-constrained machines | `--cache-chunk-size 250 --workers 2` | Lowers peak memory consumption per query batch. |
+| High-speed batch cache revalidation | `--cache-chunk-size 1000` | Minimizes database round-trips when reading large cache tables. |
 
 ## Spreadsheet Column Detection
 

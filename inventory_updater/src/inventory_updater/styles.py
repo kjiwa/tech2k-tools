@@ -29,7 +29,7 @@ QGroupBox::title {
     color: #334155;
 }
 
-QLineEdit, QSpinBox, QComboBox {
+QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {
     background-color: #ffffff;
     border: 1px solid #cbd5e1;
     border-radius: 6px;
@@ -38,7 +38,7 @@ QLineEdit, QSpinBox, QComboBox {
     selection-background-color: #2563eb;
 }
 
-QLineEdit:focus, QSpinBox:focus, QComboBox:focus {
+QLineEdit:focus, QSpinBox:focus, QDoubleSpinBox:focus, QComboBox:focus {
     border: 1.5px solid #2563eb;
     background-color: #ffffff;
 }

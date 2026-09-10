@@ -46,7 +46,15 @@ MarconeClient(
 )
 ```
 
-The client manages session cookies, request throttling, and thread-local sessions for concurrent workers. Implements context manager protocol (`__enter__` and `__exit__`).
+The client manages session cookies, request throttling across threads via a global lock and monotonic timestamp, and thread-local sessions for concurrent workers. Implements context manager protocol (`__enter__` and `__exit__`).
+
+#### Parameters
+
+- `base_url`: Marcone portal URL root.
+- `user_agent`: Custom user agent header.
+- `timeout`: Network request timeout in seconds (default: 30.0).
+- `throttle_seconds`: Enforced minimum delay between consecutive HTTP requests across all worker threads (default: 0.2s, ~5 req/s peak).
+- `session`: Optional custom `requests.Session` instance.
 
 #### Methods
 

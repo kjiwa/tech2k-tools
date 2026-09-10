@@ -89,6 +89,28 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         help="Number of concurrent lookup worker threads (default: 3)",
     )
     parser.add_argument(
+        "--throttle",
+        "--throttle-seconds",
+        type=float,
+        default=0.2,
+        dest="throttle_seconds",
+        help="Minimum delay between HTTP requests across threads in seconds (default: 0.2)",
+    )
+    parser.add_argument(
+        "--cache-chunk-size",
+        "--batch-size",
+        type=int,
+        default=500,
+        dest="cache_chunk_size",
+        help="Chunk size for batch SQLite cache queries (default: 500)",
+    )
+    parser.add_argument(
+        "--lookahead",
+        type=int,
+        default=None,
+        help="Pipeline submission lookahead window size (default: max(workers * 3, 10))",
+    )
+    parser.add_argument(
         "--cache-file",
         default=".cache/marcone_prices.sqlite",
         help="SQLite cache file path (default: .cache/marcone_prices.sqlite)",
@@ -156,9 +178,12 @@ def _resolve_credentials(
 
 
 def _create_authenticated_client(
-    username: str, password: str, account_number: str | None
+    username: str,
+    password: str,
+    account_number: str | None,
+    throttle_seconds: float = 0.2,
 ) -> tuple[MarconeClient | None, int]:
-    client = MarconeClient()
+    client = MarconeClient(throttle_seconds=throttle_seconds)
     try:
         print(f"Logging in to Marcone as {username}...")
         client.login(
@@ -205,17 +230,18 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     client, exit_code = _create_authenticated_client(
-        username, password, account_number
+        username, password, account_number, throttle_seconds=args.throttle_seconds
     )
     if client is None:
         return exit_code
 
-    cache = PriceCache(db_path=args.cache_file)
+    cache = PriceCache(db_path=args.cache_file, chunk_size=args.cache_chunk_size)
     updater = InventoryUpdater(
         client=client,
         cache=cache,
         cache_ttl_seconds=args.cache_ttl_days * 86400,
         workers=args.workers,
+        cache_chunk_size=args.cache_chunk_size,
     )
 
     def progress_callback(current: int, total: int, part_no: str) -> None:
@@ -238,6 +264,8 @@ def main(argv: list[str] | None = None) -> int:
             set_supplier=args.set_supplier,
             only_missing=args.only_missing,
             progress_cb=progress_callback,
+            workers=args.workers,
+            lookahead=args.lookahead,
         )
     finally:
         client.close()

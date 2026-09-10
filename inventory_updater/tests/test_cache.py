@@ -68,6 +68,21 @@ def test_cache_get_many(tmp_path):
     assert "PART4" not in cached_map
 
 
+def test_cache_get_many_custom_chunk_size(tmp_path):
+    db_file = tmp_path / "cache.sqlite"
+    cache = PriceCache(db_path=str(db_file), chunk_size=2)
+    assert cache.chunk_size == 2
+
+    for i in range(5):
+        cache.set(PartPricing(part_number=f"PART{i}", customer_cost=float(i)))
+
+    cached_map, missing_set = cache.get_many(
+        [f"PART{i}" for i in range(5)], chunk_size=2
+    )
+    assert len(cached_map) == 5
+    assert len(missing_set) == 0
+
+
 def test_cache_concurrent_writes(tmp_path):
     from concurrent.futures import ThreadPoolExecutor
 
@@ -103,5 +118,3 @@ def test_user_cache_dir(monkeypatch, tmp_path):
     monkeypatch.setattr("inventory_updater.cache.Path.cwd", lambda: tmp_path)
     cache_path = get_default_cache_path()
     assert cache_path == str(mac_dir / "marcone_prices.sqlite")
-
-

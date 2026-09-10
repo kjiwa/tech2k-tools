@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDialog,
+    QDoubleSpinBox,
     QFileDialog,
     QFrame,
     QGridLayout,
@@ -83,6 +84,9 @@ class UpdateWorker(QThread):
         cache_file: str | None = None,
         cache_ttl_days: float = 7.0,
         workers: int = 3,
+        throttle_seconds: float = 0.2,
+        cache_chunk_size: int = 500,
+        lookahead: int | None = None,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -100,13 +104,16 @@ class UpdateWorker(QThread):
         self.cache_file = cache_file or get_default_cache_path()
         self.cache_ttl_days = cache_ttl_days
         self.workers = workers
+        self.throttle_seconds = throttle_seconds
+        self.cache_chunk_size = cache_chunk_size
+        self.lookahead = lookahead
         self._is_cancelled = False
 
     def cancel(self) -> None:
         self._is_cancelled = True
 
     def run(self) -> None:
-        client = MarconeClient()
+        client = MarconeClient(throttle_seconds=self.throttle_seconds)
         try:
             self.status_signal.emit(f"Connecting to Marcone as {self.username}...")
             client.login(
@@ -116,12 +123,15 @@ class UpdateWorker(QThread):
             )
 
             self.status_signal.emit("Initializing price cache...")
-            cache = PriceCache(db_path=self.cache_file)
+            cache = PriceCache(
+                db_path=self.cache_file, chunk_size=self.cache_chunk_size
+            )
             updater = InventoryUpdater(
                 client=client,
                 cache=cache,
                 cache_ttl_seconds=self.cache_ttl_days * 86400,
                 workers=self.workers,
+                cache_chunk_size=self.cache_chunk_size,
             )
 
             def on_progress(cur: int, tot: int, part: str) -> None:
@@ -143,6 +153,8 @@ class UpdateWorker(QThread):
                 progress_cb=on_progress,
                 row_cb=on_row,
                 cancel_check=lambda: self._is_cancelled,
+                workers=self.workers,
+                lookahead=self.lookahead,
             )
             self.finished_signal.emit(stats)
         except AuthenticationError as exc:
@@ -648,6 +660,65 @@ class MainWindow(QMainWindow):
         )
         options_layout.addLayout(limit_row, 2, 1)
 
+        concurrency_row = QHBoxLayout()
+        self.workers_spin = QSpinBox()
+        self.workers_spin.setRange(1, 16)
+        self.workers_spin.setValue(3)
+        self.workers_spin.setFixedWidth(65)
+        self.workers_spin.setToolTip(
+            "Number of concurrent lookup worker threads (corresponds to --workers in CLI)."
+        )
+        concurrency_row.addWidget(self.workers_spin)
+        concurrency_row.addSpacing(6)
+        lbl_workers = QLabel("threads")
+        lbl_workers.setStyleSheet("color: #64748b; font-size: 11px;")
+        concurrency_row.addWidget(lbl_workers)
+
+        concurrency_row.addSpacing(24)
+        lbl_throttle_title = QLabel("Throttle:")
+        lbl_throttle_title.setStyleSheet("font-weight: 500; color: #475569;")
+        concurrency_row.addWidget(lbl_throttle_title)
+        concurrency_row.addSpacing(6)
+        self.throttle_spin = QDoubleSpinBox()
+        self.throttle_spin.setRange(0.0, 5.0)
+        self.throttle_spin.setSingleStep(0.05)
+        self.throttle_spin.setDecimals(2)
+        self.throttle_spin.setValue(0.20)
+        self.throttle_spin.setSuffix(" s")
+        self.throttle_spin.setFixedWidth(75)
+        self.throttle_spin.setToolTip(
+            "Minimum delay between HTTP requests across all threads (corresponds to --throttle in CLI)."
+        )
+        concurrency_row.addWidget(self.throttle_spin)
+
+        concurrency_row.addSpacing(24)
+        lbl_batch_title = QLabel("Cache batch:")
+        lbl_batch_title.setStyleSheet("font-weight: 500; color: #475569;")
+        concurrency_row.addWidget(lbl_batch_title)
+        concurrency_row.addSpacing(6)
+        self.batch_spin = QSpinBox()
+        self.batch_spin.setRange(50, 2000)
+        self.batch_spin.setSingleStep(50)
+        self.batch_spin.setValue(500)
+        self.batch_spin.setFixedWidth(75)
+        self.batch_spin.setToolTip(
+            "Number of items per SQLite cache query chunk (corresponds to --cache-chunk-size in CLI)."
+        )
+        concurrency_row.addWidget(self.batch_spin)
+        concurrency_row.addSpacing(6)
+        lbl_batch = QLabel("items")
+        lbl_batch.setStyleSheet("color: #64748b; font-size: 11px;")
+        concurrency_row.addWidget(lbl_batch)
+
+        concurrency_row.addStretch(1)
+        options_layout.addWidget(
+            make_row_label("Concurrency:"),
+            3,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+        options_layout.addLayout(concurrency_row, 3, 1)
+
         rules_row = QHBoxLayout()
         self.cb_missing_only = QCheckBox("Only update missing prices (blank or zero)")
         self.cb_missing_only.setChecked(True)
@@ -667,11 +738,11 @@ class MainWindow(QMainWindow):
         rules_row.addStretch(1)
         options_layout.addWidget(
             make_row_label("Options:"),
-            3,
+            4,
             0,
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
         )
-        options_layout.addLayout(rules_row, 3, 1)
+        options_layout.addLayout(rules_row, 4, 1)
         return options_group
 
     def _build_action_bar(self) -> QHBoxLayout:
@@ -774,9 +845,6 @@ class MainWindow(QMainWindow):
 
         main_layout.addWidget(self._build_success_frame())
         main_layout.addWidget(self._build_results_table(), 1)
-
-
-
 
     def _update_connection_chip(self) -> None:
         creds = load_credentials()
@@ -908,6 +976,9 @@ class MainWindow(QMainWindow):
             username=creds["username"],
             password=creds["password"],
             account_number=creds.get("account_number", ""),
+            workers=self.workers_spin.value(),
+            throttle_seconds=self.throttle_spin.value(),
+            cache_chunk_size=self.batch_spin.value(),
             parent=self,
         )
 

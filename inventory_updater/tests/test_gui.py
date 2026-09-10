@@ -70,6 +70,9 @@ def test_main_window_init(qapp):
         assert window.cb_missing_only.isChecked() is True
         assert window.cb_dry_run.isChecked() is False
         assert window.limit_spin.value() == 0
+        assert window.workers_spin.value() == 3
+        assert window.throttle_spin.value() == 0.20
+        assert window.batch_spin.value() == 500
 
 
 def test_main_window_file_selection_and_options(qapp, test_excel_file):
@@ -194,6 +197,31 @@ def test_update_worker_init_and_cancel(qapp, tmp_path):
         password="pwd",
     )
     assert worker.workers == 3
+    assert worker.throttle_seconds == 0.2
+    assert worker.cache_chunk_size == 500
     assert worker._is_cancelled is False
     worker.cancel()
     assert worker._is_cancelled is True
+
+
+def test_main_window_concurrency_options(qapp, test_excel_file):
+    with (
+        patch(
+            "inventory_updater.gui.load_credentials",
+            return_value={"username": "testuser", "password": "pw"},
+        ),
+        patch("inventory_updater.gui.UpdateWorker") as mock_worker_cls,
+    ):
+        window = MainWindow()
+        window.drop_area.set_file(str(test_excel_file))
+        window.workers_spin.setValue(6)
+        window.throttle_spin.setValue(0.45)
+        window.batch_spin.setValue(250)
+
+        window._on_start()
+
+        assert mock_worker_cls.call_args.kwargs["workers"] == 6
+        assert (
+            pytest.approx(mock_worker_cls.call_args.kwargs["throttle_seconds"]) == 0.45
+        )
+        assert mock_worker_cls.call_args.kwargs["cache_chunk_size"] == 250
