@@ -19,6 +19,6 @@ dev = [
     "pyinstaller>=6.11.0",
     "pytest>=8.0.0",
     "requests-mock>=1.12.0",
-    "ruff>=0.8.0",
+    "ruff>=0.16.6",
 ]
 
