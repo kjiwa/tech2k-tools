@@ -450,6 +450,26 @@ class FileDropArea(QFrame):
         if path:
             self.set_file(path)
 
+    def _update_badges(self, info: dict[str, Any]) -> None:
+        self.row_badge.setText(f"✓ {info['row_count']:,} items")
+        self.row_badge.setStyleSheet(
+            "background-color: #dcfce7; color: #166534; padding: 3px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;"
+        )
+
+        cols_verified = info["has_part_col"] and (
+            info["has_cost_col"] or info["has_price_col"]
+        )
+        if cols_verified:
+            self.col_badge.setText("✓ Columns detected")
+            self.col_badge.setStyleSheet(
+                "background-color: #e0f2fe; color: #0369a1; padding: 3px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;"
+            )
+        else:
+            self.col_badge.setText("⚠ Missing part/price columns")
+            self.col_badge.setStyleSheet(
+                "background-color: #fee2e2; color: #991b1b; padding: 3px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;"
+            )
+
     def set_file(self, file_path: str) -> None:
         path = Path(file_path)
         try:
@@ -460,26 +480,7 @@ class FileDropArea(QFrame):
 
             self.file_name_lbl.setText(f"📄 {path.name}")
             self.file_path_lbl.setText(str(path))
-
-            self.row_badge.setText(f"✓ {info['row_count']:,} items")
-            self.row_badge.setStyleSheet(
-                "background-color: #dcfce7; color: #166534; padding: 3px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;"
-            )
-
-            cols_verified = info["has_part_col"] and (
-                info["has_cost_col"] or info["has_price_col"]
-            )
-            if cols_verified:
-                self.col_badge.setText("✓ Columns detected")
-                self.col_badge.setStyleSheet(
-                    "background-color: #e0f2fe; color: #0369a1; padding: 3px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;"
-                )
-            else:
-                self.col_badge.setText("⚠ Missing part/price columns")
-                self.col_badge.setStyleSheet(
-                    "background-color: #fee2e2; color: #991b1b; padding: 3px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;"
-                )
-
+            self._update_badges(info)
             self.file_selected.emit(str(path))
         except Exception as exc:  # noqa: BLE001
             QMessageBox.critical(
@@ -531,13 +532,7 @@ class MainWindow(QMainWindow):
                     return icon
         return QIcon()
 
-    def _init_ui(self) -> None:
-        central = QWidget()
-        self.setCentralWidget(central)
-        main_layout = QVBoxLayout(central)
-        main_layout.setSpacing(14)
-        main_layout.setContentsMargins(24, 20, 24, 20)
-
+    def _build_header(self) -> QHBoxLayout:
         header_row = QHBoxLayout()
         title_box = QVBoxLayout()
         title_box.setSpacing(2)
@@ -560,12 +555,9 @@ class MainWindow(QMainWindow):
 
         header_row.addWidget(self.conn_chip)
         header_row.addWidget(self.creds_btn)
-        main_layout.addLayout(header_row)
+        return header_row
 
-        self.drop_area = FileDropArea()
-        self.drop_area.file_selected.connect(self._on_file_selected)
-        main_layout.addWidget(self.drop_area)
-
+    def _build_options_group(self) -> QGroupBox:
         options_group = QGroupBox("Update Options")
         options_layout = QGridLayout(options_group)
         options_layout.setVerticalSpacing(12)
@@ -674,16 +666,15 @@ class MainWindow(QMainWindow):
         rules_row.addWidget(self.cb_dry_run)
         rules_row.addStretch(1)
         options_layout.addWidget(
-            make_row_label("Update rules:"),
+            make_row_label("Options:"),
             3,
             0,
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
         )
         options_layout.addLayout(rules_row, 3, 1)
+        return options_group
 
-        main_layout.addWidget(options_group)
-
-        # Action Buttons
+    def _build_action_bar(self) -> QHBoxLayout:
         act_row = QHBoxLayout()
         self.start_btn = QPushButton("Start Price Update")
         self.start_btn.setObjectName("primaryBtn")
@@ -696,7 +687,6 @@ class MainWindow(QMainWindow):
         self.cancel_btn.setEnabled(False)
         self.cancel_btn.clicked.connect(self._on_cancel)
         act_row.addWidget(self.cancel_btn)
-
         act_row.addStretch(1)
 
         self.lbl_updated = QLabel("Updated: 0")
@@ -720,17 +710,9 @@ class MainWindow(QMainWindow):
         act_row.addWidget(self.lbl_notfound)
         act_row.addWidget(self.lbl_skipped)
         act_row.addWidget(self.lbl_errors)
-        main_layout.addLayout(act_row)
+        return act_row
 
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setValue(0)
-        self.progress_bar.setTextVisible(True)
-        main_layout.addWidget(self.progress_bar)
-
-        self.status_lbl = QLabel("Ready. Select a spreadsheet to begin.")
-        self.status_lbl.setStyleSheet("font-size: 12px; color: #64748b;")
-        main_layout.addWidget(self.status_lbl)
-
+    def _build_success_frame(self) -> QFrame:
         self.success_frame = QFrame()
         self.success_frame.setVisible(False)
         self.success_frame.setStyleSheet(
@@ -748,8 +730,9 @@ class MainWindow(QMainWindow):
         self.show_folder_btn = QPushButton("Show in Folder")
         self.show_folder_btn.clicked.connect(self._show_in_folder)
         succ_layout.addWidget(self.show_folder_btn)
-        main_layout.addWidget(self.success_frame)
+        return self.success_frame
 
+    def _build_results_table(self) -> QTableWidget:
         self.table = QTableWidget(0, 5)
         self.table.setHorizontalHeaderLabels(
             ["Row", "Part Number", "Status", "Cost", "Price"]
@@ -762,7 +745,38 @@ class MainWindow(QMainWindow):
         header.setSectionResizeMode(4, QHeaderView.ResizeMode.Stretch)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        main_layout.addWidget(self.table, 1)
+        return self.table
+
+    def _init_ui(self) -> None:
+        central = QWidget()
+        self.setCentralWidget(central)
+        main_layout = QVBoxLayout(central)
+        main_layout.setSpacing(14)
+        main_layout.setContentsMargins(24, 20, 24, 20)
+
+        main_layout.addLayout(self._build_header())
+
+        self.drop_area = FileDropArea()
+        self.drop_area.file_selected.connect(self._on_file_selected)
+        main_layout.addWidget(self.drop_area)
+
+        main_layout.addWidget(self._build_options_group())
+        main_layout.addLayout(self._build_action_bar())
+
+        self.progress_bar = QProgressBar()
+        self.progress_bar.setValue(0)
+        self.progress_bar.setTextVisible(True)
+        main_layout.addWidget(self.progress_bar)
+
+        self.status_lbl = QLabel("Ready. Select a spreadsheet to begin.")
+        self.status_lbl.setStyleSheet("font-size: 12px; color: #64748b;")
+        main_layout.addWidget(self.status_lbl)
+
+        main_layout.addWidget(self._build_success_frame())
+        main_layout.addWidget(self._build_results_table(), 1)
+
+
+
 
     def _update_connection_chip(self) -> None:
         creds = load_credentials()
@@ -818,24 +832,18 @@ class MainWindow(QMainWindow):
             self.supplier_combo.setCurrentIndex(0)
         self.supplier_combo.blockSignals(False)
 
-    def _on_start(self) -> None:
-        if not self.selected_file_path:
-            return
-
-        creds = load_credentials()
-        if not creds.get("username") or not creds.get("password"):
-            self._open_credentials()
-            return
-
+    def _determine_output_path(self, input_path: Path) -> Path:
         if self.radio_new_file.isChecked():
-            stem = self.selected_file_path.stem
-            ext = self.selected_file_path.suffix
-            self.output_file_path = self.selected_file_path.with_name(
-                f"{stem}_updated{ext}"
-            )
-        else:
-            self.output_file_path = self.selected_file_path
+            return input_path.with_name(f"{input_path.stem}_updated{input_path.suffix}")
+        return input_path
 
+    def _determine_supplier_filter(self) -> str | None:
+        supplier_raw = self.supplier_combo.currentText().strip()
+        if not supplier_raw or supplier_raw.startswith("(All"):
+            return None
+        return supplier_raw
+
+    def _reset_run_state(self) -> None:
         self.start_btn.setEnabled(False)
         self.cancel_btn.setEnabled(True)
         self.success_frame.setVisible(False)
@@ -846,11 +854,46 @@ class MainWindow(QMainWindow):
         self.lbl_skipped.setText("Skipped: 0")
         self.lbl_errors.setText("Errors: 0")
 
-        supplier_raw = self.supplier_combo.currentText().strip()
-        if not supplier_raw or supplier_raw.startswith("(All"):
-            supplier_filter = None
+    @staticmethod
+    def _format_cost_diff(res: RowUpdateResult) -> str:
+        if res.new_cost is not None and res.old_cost is not None:
+            return f"${res.old_cost:.2f} → ${res.new_cost:.2f}"
+        if res.new_cost is not None:
+            return f"${res.new_cost:.2f}"
+        return "-"
+
+    @staticmethod
+    def _format_price_diff(res: RowUpdateResult) -> str:
+        if res.new_price is not None and res.old_price is not None:
+            price_str = f"${res.old_price:.2f} → ${res.new_price:.2f}"
+        elif res.new_price is not None:
+            price_str = f"${res.new_price:.2f}"
         else:
-            supplier_filter = supplier_raw
+            price_str = "-"
+        return f"{price_str}  ({res.message})" if res.message else price_str
+
+    @staticmethod
+    def _status_color(status: str) -> QColor:
+        color_map = {
+            "updated": "#16a34a",
+            "not_found": "#d97706",
+            "error": "#dc2626",
+        }
+        return QColor(color_map.get(status, "#64748b"))
+
+    def _on_start(self) -> None:
+        if not self.selected_file_path:
+            return
+
+        creds = load_credentials()
+        if not creds.get("username") or not creds.get("password"):
+            self._open_credentials()
+            return
+
+        self.output_file_path = self._determine_output_path(self.selected_file_path)
+        self._reset_run_state()
+
+        supplier_filter = self._determine_supplier_filter()
         limit_val = self.limit_spin.value() or None
 
         self.worker = UpdateWorker(
@@ -902,31 +945,13 @@ class MainWindow(QMainWindow):
 
         item_status = QTableWidgetItem(res.status.upper())
         item_status.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
-        if res.status == "updated":
-            item_status.setForeground(QColor("#16a34a"))
-        elif res.status == "not_found":
-            item_status.setForeground(QColor("#d97706"))
-        elif res.status == "error":
-            item_status.setForeground(QColor("#dc2626"))
-        else:
-            item_status.setForeground(QColor("#64748b"))
+        item_status.setForeground(self._status_color(res.status))
         self.table.setItem(row_pos, 2, item_status)
 
-        cost_str = (
-            f"${res.old_cost:.2f} → ${res.new_cost:.2f}"
-            if res.new_cost is not None and res.old_cost is not None
-            else (f"${res.new_cost:.2f}" if res.new_cost is not None else "-")
-        )
-        item_cost = QTableWidgetItem(cost_str)
+        item_cost = QTableWidgetItem(self._format_cost_diff(res))
         self.table.setItem(row_pos, 3, item_cost)
 
-        price_str = (
-            f"${res.old_price:.2f} → ${res.new_price:.2f}"
-            if res.new_price is not None and res.old_price is not None
-            else (f"${res.new_price:.2f}" if res.new_price is not None else "-")
-        )
-        details = f"{price_str}  ({res.message})" if res.message else price_str
-        item_price = QTableWidgetItem(details)
+        item_price = QTableWidgetItem(self._format_price_diff(res))
         self.table.setItem(row_pos, 4, item_price)
 
         self.table.scrollToBottom()

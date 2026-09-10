@@ -24,14 +24,7 @@ from PySide6.QtGui import (
 )
 
 
-def draw_master_icon(size: int = 1024) -> QImage:
-    img = QImage(size, size, QImage.Format.Format_ARGB32)
-    img.fill(Qt.GlobalColor.transparent)
-    p = QPainter(img)
-    p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    scale = size / 1024.0
-
-    # Squircle background
+def _draw_background_squircle(p: QPainter, size: int, scale: float) -> None:
     m, r = 48.0 * scale, 210.0 * scale
     bg_path = QPainterPath()
     bg_path.addRoundedRect(QRectF(m, m, size - 2 * m, size - 2 * m), r, r)
@@ -41,7 +34,8 @@ def draw_master_icon(size: int = 1024) -> QImage:
     p.fillPath(bg_path, QBrush(g))
     p.strokePath(bg_path, QPen(QColor(255, 255, 255, 30), 4.0 * scale))
 
-    # Inner card
+
+def _draw_inner_card(p: QPainter, scale: float) -> None:
     c_path = QPainterPath()
     c_path.addRoundedRect(QRectF(150.0 * scale, 160.0 * scale, 724.0 * scale, 704.0 * scale), 50.0 * scale, 50.0 * scale)
     cg = QLinearGradient(0, 160.0 * scale, 0, 864.0 * scale)
@@ -49,17 +43,16 @@ def draw_master_icon(size: int = 1024) -> QImage:
     cg.setColorAt(1.0, QColor("#1d4ed8"))
     p.fillPath(c_path, QBrush(cg))
 
-    # Spreadsheet card
+
+def _draw_spreadsheet(p: QPainter, scale: float) -> None:
     s_path = QPainterPath()
     s_path.addRoundedRect(QRectF(190.0 * scale, 240.0 * scale, 644.0 * scale, 570.0 * scale), 35.0 * scale, 35.0 * scale)
     p.fillPath(s_path, QBrush(QColor("#ffffff")))
 
-    # Header bar
     h_path = QPainterPath()
     h_path.addRoundedRect(QRectF(190.0 * scale, 240.0 * scale, 644.0 * scale, 100.0 * scale), 35.0 * scale, 35.0 * scale)
     p.fillPath(h_path, QBrush(QColor("#0284c7")))
 
-    # Rows
     for i, c in enumerate(["#10b981", "#3b82f6", "#f59e0b", "#6366f1"]):
         y = 380.0 * scale + i * 95.0 * scale
         cp = QPainterPath()
@@ -68,7 +61,8 @@ def draw_master_icon(size: int = 1024) -> QImage:
         p.setPen(QPen(QColor("#cbd5e1"), 10.0 * scale))
         p.drawLine(QPointF(370.0 * scale, y + 14.0 * scale), QPointF(770.0 * scale, y + 14.0 * scale))
 
-    # Circular badge
+
+def _draw_dollar_badge(p: QPainter, size: int, scale: float) -> None:
     bs = 280.0 * scale
     bx, by = size - bs - 70.0 * scale, size - bs - 70.0 * scale
     brect = QRectF(bx, by, bs, bs)
@@ -82,6 +76,20 @@ def draw_master_icon(size: int = 1024) -> QImage:
     p.setPen(QPen(QColor("#ffffff")))
     p.setFont(QFont("Arial", int(140.0 * scale), QFont.Weight.Bold))
     p.drawText(brect, Qt.AlignmentFlag.AlignCenter, "$")
+
+
+def draw_master_icon(size: int = 1024) -> QImage:
+    img = QImage(size, size, QImage.Format.Format_ARGB32)
+    img.fill(Qt.GlobalColor.transparent)
+    p = QPainter(img)
+    p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    scale = size / 1024.0
+
+    _draw_background_squircle(p, size, scale)
+    _draw_inner_card(p, scale)
+    _draw_spreadsheet(p, scale)
+    _draw_dollar_badge(p, size, scale)
+
     p.end()
     return img
 

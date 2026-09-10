@@ -10,7 +10,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 from typing_extensions import Self
 
 from marcone.exceptions import (
@@ -152,10 +152,20 @@ class MarconeClient:
     ) -> bool:
         """Authenticate with my.marcone.com using username and password."""
         logger.info("Initializing session at %s/UserLogin", self.base_url)
+        self._load_login_page()
+        data = self._submit_login(username, password)
+        self._validate_login_response(data)
+        self._handle_account_selection(data, customer_number)
+        self._is_logged_in = True
+        logger.info("Successfully authenticated with Marcone as '%s'", username)
+        return True
+
+    def _load_login_page(self) -> None:
         init_resp = self._request("GET", "/UserLogin")
         if init_resp.status_code != 200:
             raise NetworkError(f"Failed to load login page: HTTP {init_resp.status_code}")
 
+    def _submit_login(self, username: str, password: str) -> dict[str, Any]:
         post_headers = {
             "X-Requested-With": "XMLHttpRequest",
             "Origin": self.base_url,
@@ -168,25 +178,23 @@ class MarconeClient:
             "RememberMe": "true",
             "code": "",
         }
-
         resp = self._request("POST", "/UserLogin/DoLogin", headers=post_headers, data=post_data)
         if resp.status_code != 200:
             raise AuthenticationError(f"Login request failed with HTTP {resp.status_code}")
-
         try:
-            data = resp.json()
+            return resp.json()
         except ValueError as exc:
             raise AuthenticationError(f"Unexpected non-JSON response from DoLogin: {resp.text[:200]}") from exc
 
+    def _validate_login_response(self, data: dict[str, Any]) -> None:
         success = bool(data.get("Result"))
         message = data.get("Message") or ""
-
         if not success:
             raise AuthenticationError(f"Authentication failed: {message or 'Invalid username or password'}")
-
         if message in ("blocked", "subuserblocked"):
             raise AuthenticationError(f"Marcone account is blocked: {message}")
 
+    def _handle_account_selection(self, data: dict[str, Any], customer_number: str | int | None) -> None:
         if data.get("SetShipToReadOnly"):
             if customer_number is None:
                 raise AccountSelectionRequiredError(
@@ -194,10 +202,6 @@ class MarconeClient:
                     "Provide MARCONE_ACCOUNT_NUMBER."
                 )
             self._set_customer_number(str(customer_number))
-
-        self._is_logged_in = True
-        logger.info("Successfully authenticated with Marcone as '%s'", username)
-        return True
 
     def _set_customer_number(self, customer_number: str) -> None:
         """Select a customer/account number for multi-account logins."""
@@ -227,6 +231,20 @@ class MarconeClient:
         """Whether this client has successfully authenticated."""
         return self._is_logged_in
 
+    @staticmethod
+    def _parse_makes_from_html(html: str) -> list[str]:
+        soup = BeautifulSoup(html, "html.parser")
+        makes: list[str] = []
+        for option in soup.find_all("option"):
+            val = option.get("value")
+            if val is None:
+                val = option.get_text()
+            val = val.strip()
+            clean_val = val.strip("-").strip()
+            if clean_val and not clean_val.lower().startswith("select") and clean_val not in makes:
+                makes.append(clean_val)
+        return makes
+
     def get_part_makes(self, part_number: str) -> list[str]:
         """Fetch available manufacturer (make) codes for a given part number."""
         headers = {
@@ -248,18 +266,7 @@ class MarconeClient:
         except ValueError:
             html = resp.text
 
-        soup = BeautifulSoup(html, "html.parser")
-        makes: list[str] = []
-        for option in soup.find_all("option"):
-            val = option.get("value")
-            if val is None:
-                val = option.get_text()
-            val = val.strip()
-            clean_val = val.strip("-").strip()
-            if clean_val and not clean_val.lower().startswith("select") and clean_val not in makes:
-                makes.append(clean_val)
-
-        return makes
+        return self._parse_makes_from_html(html)
 
     def get_customer_price(self, part_number: str, make: str) -> float | None:
         """Fetch the customer wholesale cost for a specific part and make."""
@@ -379,50 +386,65 @@ class MarconeClient:
             in_stock=in_stock,
         )
 
+    @staticmethod
+    def _extract_detail_make(soup: BeautifulSoup, default_make: str) -> str:
+        if default_make:
+            return default_make
+        make_input = soup.find("input", id="ProductDetailMake")
+        if make_input and make_input.get("value"):
+            return str(make_input["value"]).strip()
+        make_el = soup.select_one("tr.make_tr td.partbig, #ProductDetailMake")
+        if make_el:
+            return make_el.get_text(strip=True)
+        return ""
+
+    def _extract_customer_cost(self, soup: BeautifulSoup) -> float | None:
+        price_row = soup.find(id="trPrice")
+        if not price_row:
+            return None
+        price_td = price_row.select_one("td.priceblock_ourprice, td.green, td.red")
+        return self._clean_price(price_td.get_text()) if price_td else None
+
+    def _extract_list_price(self, soup: BeautifulSoup) -> float | None:
+        list_row = soup.find(id="trListPrice")
+        if not list_row:
+            return None
+        list_b = list_row.select_one("td.green b, td.green, td")
+        return self._clean_price(list_b.get_text()) if list_b else None
+
+    def _extract_core_charge(self, soup: BeautifulSoup) -> float | None:
+        core_row = soup.find(id="trCoreCharge")
+        if not core_row:
+            return None
+        return self._clean_price(core_row.get_text())
+
+    @staticmethod
+    def _extract_stock_status(soup: BeautifulSoup) -> bool | None:
+        stock_el = soup.select_one("span.a-color-success, span.spanInstock")
+        if not stock_el:
+            return None
+        return "in stock" in stock_el.get_text().lower()
+
+    @staticmethod
+    def _extract_description(soup: BeautifulSoup) -> str | None:
+        desc_el = soup.select_one("h4.cross, h1.producttitle, .product_name")
+        return desc_el.get_text(strip=True) if desc_el else None
+
     def _parse_detail_soup(self, soup: BeautifulSoup, part_number: str, make: str) -> PartPricing | None:
         """Extract prices and metadata from a /Product/Detail page."""
-        if not make:
-            make_input = soup.find("input", id="ProductDetailMake")
-            if make_input and make_input.get("value"):
-                make = str(make_input["value"]).strip()
-            else:
-                make_el = soup.select_one("tr.make_tr td.partbig, #ProductDetailMake")
-                if make_el:
-                    make = make_el.get_text(strip=True)
-
-        customer_cost: float | None = None
-        price_row = soup.find(id="trPrice")
-        if price_row:
-            price_td = price_row.select_one("td.priceblock_ourprice, td.green, td.red")
-            if price_td:
-                customer_cost = self._clean_price(price_td.get_text())
-
-        list_price: float | None = None
-        list_row = soup.find(id="trListPrice")
-        if list_row:
-            list_b = list_row.select_one("td.green b, td.green, td")
-            if list_b:
-                list_price = self._clean_price(list_b.get_text())
-
-        core_charge: float | None = None
-        core_row = soup.find(id="trCoreCharge")
-        if core_row:
-            core_charge = self._clean_price(core_row.get_text())
-
-        in_stock: bool | None = None
-        stock_el = soup.select_one("span.a-color-success, span.spanInstock")
-        if stock_el:
-            in_stock = "in stock" in stock_el.get_text().lower()
-
-        desc_el = soup.select_one("h4.cross, h1.producttitle, .product_name")
-        description = desc_el.get_text(strip=True) if desc_el else None
+        resolved_make = self._extract_detail_make(soup, make)
+        customer_cost = self._extract_customer_cost(soup)
+        list_price = self._extract_list_price(soup)
+        core_charge = self._extract_core_charge(soup)
+        in_stock = self._extract_stock_status(soup)
+        description = self._extract_description(soup)
 
         if customer_cost is None and list_price is None:
             return None
 
         return PartPricing(
             part_number=part_number,
-            make=make,
+            make=resolved_make,
             description=description,
             customer_cost=customer_cost,
             list_price=list_price,
@@ -430,22 +452,28 @@ class MarconeClient:
             in_stock=in_stock,
         )
 
+    def _extract_listing_item(self, item: Tag, part_number: str) -> PartPricing | None:
+        img = item.find("img", class_="productimage")
+        item_part = img.get("part", "") if img else ""
+        item_make = img.get("make", "") if img else ""
+
+        if not item_part or item_part.strip().upper() == part_number.strip().upper():
+            price_el = item.select_one("span.spanPrice, .price")
+            cost = self._clean_price(price_el.get_text()) if price_el else None
+            return PartPricing(
+                part_number=part_number,
+                make=item_make,
+                customer_cost=cost,
+            )
+        return None
+
     def _parse_listing_soup(self, soup: BeautifulSoup, part_number: str) -> PartPricing | None:
         """Extract prices from a search result item listing."""
         items = soup.select(".partResult_items, .search_item, .RepPartlist")
         for item in items:
-            img = item.find("img", class_="productimage")
-            item_part = img.get("part", "") if img else ""
-            item_make = img.get("make", "") if img else ""
-
-            if not item_part or item_part.strip().upper() == part_number.strip().upper():
-                price_el = item.select_one("span.spanPrice, .price")
-                cost = self._clean_price(price_el.get_text()) if price_el else None
-                return PartPricing(
-                    part_number=part_number,
-                    make=item_make,
-                    customer_cost=cost,
-                )
+            pricing = self._extract_listing_item(item, part_number)
+            if pricing is not None:
+                return pricing
         return None
 
     @staticmethod

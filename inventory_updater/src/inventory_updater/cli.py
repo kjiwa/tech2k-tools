@@ -11,7 +11,7 @@ from marcone.client import MarconeClient
 from marcone.exceptions import AuthenticationError, MarconeError
 
 from inventory_updater.cache import PriceCache
-from inventory_updater.updater import InventoryUpdater
+from inventory_updater.updater import InventoryUpdater, UpdateStats
 
 
 def setup_logging(verbose: bool) -> None:
@@ -120,12 +120,8 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(args)
 
 
-def main(argv: list[str] | None = None) -> int:
-    load_dotenv()
-    args = parse_args(argv)
-    setup_logging(args.verbose)
-
-    input_path = Path(args.file)
+def _resolve_input_path(raw_path: str) -> Path | None:
+    input_path = Path(raw_path)
     if not input_path.exists():
         if (
             input_path.suffix.lower() == ".xslx"
@@ -137,22 +133,69 @@ def main(argv: list[str] | None = None) -> int:
             and input_path.with_suffix(".xslx").exists()
         ):
             input_path = input_path.with_suffix(".xslx")
-    if not input_path.exists():
-        sys.stderr.write(f"Error: Inventory file '{input_path}' not found.\n")
-        return 1
+    return input_path if input_path.exists() else None
 
-    if args.in_place:
-        output_path = input_path
-    elif args.output:
-        output_path = Path(args.output)
-    else:
-        output_path = input_path.with_name(
-            f"{input_path.stem}_updated{input_path.suffix}"
-        )
 
+def _resolve_output_path(
+    input_path: Path, output_arg: str | None, in_place: bool
+) -> Path:
+    if in_place:
+        return input_path
+    if output_arg:
+        return Path(output_arg)
+    return input_path.with_name(f"{input_path.stem}_updated{input_path.suffix}")
+
+
+def _resolve_credentials(
+    args: argparse.Namespace,
+) -> tuple[str | None, str | None, str | None]:
     username = args.username or os.getenv("MARCONE_USERNAME")
     password = args.password or os.getenv("MARCONE_PASSWORD")
     account_number = args.account_number or os.getenv("MARCONE_ACCOUNT_NUMBER")
+    return username, password, account_number
+
+
+def _create_authenticated_client(
+    username: str, password: str, account_number: str | None
+) -> tuple[MarconeClient | None, int]:
+    client = MarconeClient()
+    try:
+        print(f"Logging in to Marcone as {username}...")
+        client.login(
+            username=username, password=password, customer_number=account_number
+        )
+        return client, 0
+    except AuthenticationError as exc:
+        sys.stderr.write(f"Authentication failed: {exc}\n")
+        return None, 2
+    except MarconeError as exc:
+        sys.stderr.write(f"Marcone connection error: {exc}\n")
+        return None, 2
+
+
+def _print_summary(stats: UpdateStats, output_path: Path, dry_run: bool) -> None:
+    print("\nSummary:")
+    print(f"  Total rows: {stats.total_rows}")
+    print(f"  Updated:    {stats.updated}")
+    print(f"  Skipped:    {stats.skipped}")
+    print(f"  Not found:  {stats.not_found}")
+    print(f"  Errors:     {stats.errors}")
+    if not dry_run and stats.updated > 0:
+        print(f"Output saved to: {output_path}")
+
+
+def main(argv: list[str] | None = None) -> int:
+    load_dotenv()
+    args = parse_args(argv)
+    setup_logging(args.verbose)
+
+    input_path = _resolve_input_path(args.file)
+    if not input_path:
+        sys.stderr.write(f"Error: Inventory file '{args.file}' not found.\n")
+        return 1
+
+    output_path = _resolve_output_path(input_path, args.output, args.in_place)
+    username, password, account_number = _resolve_credentials(args)
 
     if not username or not password:
         sys.stderr.write(
@@ -161,18 +204,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    client = MarconeClient()
-    try:
-        print(f"Logging in to Marcone as {username}...")
-        client.login(
-            username=username, password=password, customer_number=account_number
-        )
-    except AuthenticationError as exc:
-        sys.stderr.write(f"Authentication failed: {exc}\n")
-        return 2
-    except MarconeError as exc:
-        sys.stderr.write(f"Marcone connection error: {exc}\n")
-        return 2
+    client, exit_code = _create_authenticated_client(
+        username, password, account_number
+    )
+    if client is None:
+        return exit_code
 
     cache = PriceCache(db_path=args.cache_file)
     updater = InventoryUpdater(
@@ -206,15 +242,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         client.close()
 
-    print("\nSummary:")
-    print(f"  Total rows: {stats.total_rows}")
-    print(f"  Updated:    {stats.updated}")
-    print(f"  Skipped:    {stats.skipped}")
-    print(f"  Not found:  {stats.not_found}")
-    print(f"  Errors:     {stats.errors}")
-    if not args.dry_run and stats.updated > 0:
-        print(f"Output saved to: {output_path}")
-
+    _print_summary(stats, output_path, args.dry_run)
     return 0
 
 

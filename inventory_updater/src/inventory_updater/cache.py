@@ -32,6 +32,52 @@ def get_default_cache_path() -> str:
     return str(get_user_cache_dir() / "marcone_prices.sqlite")
 
 
+def _is_expired(
+    updated_at_str: str | None,
+    max_age_seconds: float | None,
+    now: datetime | None = None,
+) -> bool:
+    """Return True if updated_at is missing, invalid, or older than max_age_seconds."""
+    if max_age_seconds is None or not updated_at_str:
+        return False
+    try:
+        updated_at = datetime.fromisoformat(updated_at_str)
+        current_time = now or datetime.now(timezone.utc)
+        return (current_time - updated_at).total_seconds() > max_age_seconds
+    except ValueError:
+        return True
+
+
+def _row_to_pricing(
+    part_number: str,
+    make: str | None,
+    customer_cost: float | None,
+    list_price: float | None,
+    core_charge: float | None,
+    in_stock: int | None,
+    description: str | None,
+    metadata_json: str | None,
+) -> PartPricing:
+    """Deserialize database columns into a PartPricing instance."""
+    metadata: dict[str, Any] = {}
+    if metadata_json:
+        try:
+            metadata = json.loads(metadata_json)
+        except ValueError:
+            pass
+
+    return PartPricing(
+        part_number=part_number,
+        make=make or "",
+        description=description,
+        customer_cost=customer_cost,
+        list_price=list_price,
+        core_charge=core_charge,
+        in_stock=bool(in_stock) if in_stock is not None else None,
+        metadata=metadata,
+    )
+
+
 class PriceCache:
     """SQLite-backed cache for Marcone part lookups."""
 
@@ -97,34 +143,18 @@ class PriceCache:
             updated_at_str,
         ) = row
 
-        if status != "ok":
+        if status != "ok" or _is_expired(updated_at_str, max_age_seconds):
             return None
 
-        if max_age_seconds is not None and updated_at_str:
-            try:
-                updated_at = datetime.fromisoformat(updated_at_str)
-                age = (datetime.now(timezone.utc) - updated_at).total_seconds()
-                if age > max_age_seconds:
-                    return None
-            except ValueError:
-                return None
-
-        metadata: dict[str, Any] = {}
-        if metadata_json:
-            try:
-                metadata = json.loads(metadata_json)
-            except ValueError:
-                pass
-
-        return PartPricing(
-            part_number=clean_part,
-            make=make or "",
-            description=description,
-            customer_cost=customer_cost,
-            list_price=list_price,
-            core_charge=core_charge,
-            in_stock=bool(in_stock) if in_stock is not None else None,
-            metadata=metadata,
+        return _row_to_pricing(
+            clean_part,
+            make,
+            customer_cost,
+            list_price,
+            core_charge,
+            in_stock,
+            description,
+            metadata_json,
         )
 
     def get_many(
@@ -161,8 +191,7 @@ class PriceCache:
                     """,
                     chunk,
                 )
-                rows = cur.fetchall()
-                for row in rows:
+                for row in cur.fetchall():
                     (
                         part_no,
                         make,
@@ -176,30 +205,19 @@ class PriceCache:
                         updated_at_str,
                     ) = row
 
-                    if max_age_seconds is not None and updated_at_str:
-                        try:
-                            updated_at = datetime.fromisoformat(updated_at_str)
-                            if (now - updated_at).total_seconds() > max_age_seconds:
-                                continue
-                        except ValueError:
-                            continue
+                    if _is_expired(updated_at_str, max_age_seconds, now=now):
+                        continue
 
                     if status == "ok":
-                        metadata: dict[str, Any] = {}
-                        if metadata_json:
-                            try:
-                                metadata = json.loads(metadata_json)
-                            except ValueError:
-                                pass
-                        cached_map[part_no] = PartPricing(
-                            part_number=part_no,
-                            make=make or "",
-                            description=description,
-                            customer_cost=customer_cost,
-                            list_price=list_price,
-                            core_charge=core_charge,
-                            in_stock=bool(in_stock) if in_stock is not None else None,
-                            metadata=metadata,
+                        cached_map[part_no] = _row_to_pricing(
+                            part_no,
+                            make,
+                            customer_cost,
+                            list_price,
+                            core_charge,
+                            in_stock,
+                            description,
+                            metadata_json,
                         )
                     elif status == "not_found":
                         missing_set.add(part_no)
@@ -279,16 +297,4 @@ class PriceCache:
             return False
 
         status, updated_at_str = row
-        if status != "not_found":
-            return False
-
-        if max_age_seconds is not None and updated_at_str:
-            try:
-                updated_at = datetime.fromisoformat(updated_at_str)
-                age = (datetime.now(timezone.utc) - updated_at).total_seconds()
-                if age > max_age_seconds:
-                    return False
-            except ValueError:
-                return False
-
-        return True
+        return status == "not_found" and not _is_expired(updated_at_str, max_age_seconds)
