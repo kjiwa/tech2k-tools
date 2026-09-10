@@ -175,7 +175,7 @@ class InventoryUpdater:
             except MarconeError as exc:
                 logger.error("Error looking up part %s: %s", part_no, exc)
                 stats.errors += 1
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 logger.error("Unexpected error looking up part %s: %s", part_no, exc)
                 stats.errors += 1
 

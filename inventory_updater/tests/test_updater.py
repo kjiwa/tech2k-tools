@@ -242,6 +242,29 @@ def test_updater_missing_part_logged_and_counted(tmp_path, caplog):
     assert "Part UNKNOWN_PART_XYZ not found in Marcone catalog" in caplog.text
 
 
+def test_updater_unexpected_error_logged_and_counted(tmp_path, caplog):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Part Number", "Unit Price", "Avg. Unit Cost", "Primary Vendor"])
+    ws.append(["ERROR_PART_XYZ", 0.0, 0.0, "Marcone"])
+
+    excel_path = tmp_path / "unexpected_error_test.xlsx"
+    wb.save(excel_path)
+
+    mock_client = MagicMock(spec=MarconeClient)
+    mock_client.lookup_part.side_effect = RuntimeError("Database disk corruption")
+
+    cache = PriceCache(db_path=str(tmp_path / "cache.sqlite"))
+    updater = InventoryUpdater(client=mock_client, cache=cache)
+
+    with caplog.at_level("ERROR"):
+        stats = updater.update_file(input_file=excel_path)
+
+    assert stats.errors == 1
+    assert stats.updated == 0
+    assert "Unexpected error looking up part ERROR_PART_XYZ: Database disk corruption" in caplog.text
+
+
 def test_updater_set_supplier(tmp_path, sample_excel):
     mock_client = MagicMock(spec=MarconeClient)
     mock_client.lookup_part.return_value = PartPricing(
