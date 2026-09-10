@@ -5,7 +5,7 @@ from inventory_updater.cli import main, parse_args
 
 def test_parse_args_defaults():
     args = parse_args([])
-    assert args.file == "InventoryItems.xlsx"
+    assert args.file == "Service Fusion Inventory.xlsx"
     assert args.output is None
     assert args.field == "both"
     assert args.dry_run is False
@@ -43,6 +43,9 @@ def test_main_missing_credentials(tmp_path):
     fake_file = tmp_path / "items.xlsx"
     fake_file.touch()
 
-    with patch.dict("os.environ", {}, clear=True):
+    with (
+        patch("inventory_updater.cli.load_dotenv"),
+        patch.dict("os.environ", {}, clear=True),
+    ):
         code = main(["--file", str(fake_file)])
         assert code == 1

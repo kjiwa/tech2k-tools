@@ -76,23 +76,60 @@ class InventoryUpdater:
                 continue
 
             supplier_cell = (
-                sheet.cell(row=row_idx, column=col_map["supplier"]) if "supplier" in col_map else None
+                sheet.cell(row=row_idx, column=col_map["supplier"])
+                if "supplier" in col_map
+                else None
             )
-            current_supplier = str(supplier_cell.value or "").strip() if supplier_cell else ""
+            current_supplier = (
+                str(supplier_cell.value or "").strip() if supplier_cell else ""
+            )
 
-            if supplier_filter and supplier_filter.lower() not in current_supplier.lower():
+            if (
+                supplier_filter
+                and supplier_filter.lower() not in current_supplier.lower()
+            ):
                 stats.skipped += 1
                 continue
 
-            cost_cell = sheet.cell(row=row_idx, column=col_map["cost"]) if "cost" in col_map else None
-            price_cell = sheet.cell(row=row_idx, column=col_map["price"]) if "price" in col_map else None
+            cost_cell = (
+                sheet.cell(row=row_idx, column=col_map["cost"])
+                if "cost" in col_map
+                else None
+            )
+            avg_cost_cell = (
+                sheet.cell(row=row_idx, column=col_map["avg_cost"])
+                if "avg_cost" in col_map
+                else None
+            )
+            price_cell = (
+                sheet.cell(row=row_idx, column=col_map["price"])
+                if "price" in col_map
+                else None
+            )
 
-            current_cost = cost_cell.value if cost_cell else None
-            current_price = price_cell.value if price_cell else None
+            if only_missing:
+                has_cost = any(
+                    c is not None and c.value not in (None, "", 0, 0.0, "0", "0.00")
+                    for c in (cost_cell, avg_cost_cell)
+                )
+                has_price = price_cell is not None and price_cell.value not in (
+                    None,
+                    "",
+                    0,
+                    0.0,
+                    "0",
+                    "0.00",
+                )
 
-            if only_missing and (current_cost and current_price):
-                stats.skipped += 1
-                continue
+                if field == "cost" and has_cost:
+                    stats.skipped += 1
+                    continue
+                if field == "price" and has_price:
+                    stats.skipped += 1
+                    continue
+                if field == "both" and has_cost and has_price:
+                    stats.skipped += 1
+                    continue
 
             processed_count += 1
             if progress_cb:
@@ -105,14 +142,13 @@ class InventoryUpdater:
                     continue
 
                 modified = False
-                if (
-                    field in ("cost", "both")
-                    and cost_cell
-                    and pricing.customer_cost is not None
-                    and cost_cell.value != pricing.customer_cost
-                ):
-                    cost_cell.value = pricing.customer_cost
-                    modified = True
+                if field in ("cost", "both") and pricing.customer_cost is not None:
+                    if cost_cell and cost_cell.value != pricing.customer_cost:
+                        cost_cell.value = pricing.customer_cost
+                        modified = True
+                    if avg_cost_cell and avg_cost_cell.value != pricing.customer_cost:
+                        avg_cost_cell.value = pricing.customer_cost
+                        modified = True
 
                 if (
                     field in ("price", "both")
@@ -169,22 +205,28 @@ class InventoryUpdater:
             if not h:
                 continue
             h_str = str(h).strip().lower()
-            if h_str in ("part no", "part no.", "part #", "partnumber", "part number") or h_str == "part":
-                mapping["part"] = idx
+            if (
+                h_str in ("part no", "part no.", "part #", "partnumber", "part number")
+                or h_str == "part"
+            ):
+                mapping.setdefault("part", idx)
             elif "vendor part" in h_str:
-                mapping["vendor_part"] = idx
-            elif "supplier cost" in h_str or h_str == "cost":
-                mapping["cost"] = idx
-            elif h_str in ("price *", "price"):
-                mapping["price"] = idx
-            elif "supplier name" in h_str or h_str == "supplier":
-                mapping["supplier"] = idx
+                mapping.setdefault("vendor_part", idx)
+            elif h_str in ("avg. unit cost", "avg unit cost", "average unit cost"):
+                mapping.setdefault("avg_cost", idx)
+            elif h_str in ("purchase price", "supplier cost") or h_str == "cost":
+                mapping.setdefault("cost", idx)
+            elif h_str in ("unit price", "price *", "price"):
+                mapping.setdefault("price", idx)
+            elif h_str in ("primary vendor", "supplier name", "supplier", "vendor"):
+                mapping.setdefault("supplier", idx)
             elif "manufacturer" in h_str or h_str == "make":
-                mapping["make"] = idx
+                mapping.setdefault("make", idx)
 
         mapping.setdefault("part", 1)
+        if "cost" not in mapping and "avg_cost" in mapping:
+            mapping["cost"] = mapping["avg_cost"]
         mapping.setdefault("cost", 8)
         mapping.setdefault("price", 10)
         mapping.setdefault("supplier", 14)
         return mapping
-

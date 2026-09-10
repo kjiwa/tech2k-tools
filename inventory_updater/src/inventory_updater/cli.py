@@ -25,13 +25,13 @@ def setup_logging(verbose: bool) -> None:
 
 def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Update InventoryItems.xlsx with current Marcone supplier cost and list price."
+        description="Update Service Fusion or legacy inventory spreadsheets with current Marcone supplier cost and list price."
     )
     parser.add_argument(
         "--file",
         "-f",
-        default="InventoryItems.xlsx",
-        help="Path to the inventory Excel file (default: InventoryItems.xlsx)",
+        default="Service Fusion Inventory.xlsx",
+        help="Path to the inventory Excel file (default: Service Fusion Inventory.xlsx)",
     )
     parser.add_argument(
         "--output",
@@ -48,15 +48,15 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         "--field",
         choices=["both", "cost", "price"],
         default="both",
-        help="Which fields to update: cost (Supplier Cost), price (Price *), or both (default: both)",
+        help="Which fields to update: cost (Avg. Unit Cost / Purchase Price), price (Unit Price), or both (default: both)",
     )
     parser.add_argument(
         "--supplier-filter",
-        help="Only update items where current Supplier Name contains this string (e.g. 'Marcone')",
+        help="Only update items where current Primary Vendor / Supplier Name contains this string (e.g. 'Marcone')",
     )
     parser.add_argument(
         "--set-supplier",
-        help="Set the Supplier Name column to this value for all updated parts (e.g. 'Marcone')",
+        help="Set the Primary Vendor / Supplier Name column to this value for all updated parts (e.g. 'Marcone')",
     )
     parser.add_argument(
         "--only-missing",
@@ -120,7 +120,9 @@ def main(argv: list[str] | None = None) -> int:
     elif args.output:
         output_path = Path(args.output)
     else:
-        output_path = input_path.with_name(f"{input_path.stem}_updated{input_path.suffix}")
+        output_path = input_path.with_name(
+            f"{input_path.stem}_updated{input_path.suffix}"
+        )
 
     username = args.username or os.getenv("MARCONE_USERNAME")
     password = args.password or os.getenv("MARCONE_PASSWORD")
@@ -136,7 +138,9 @@ def main(argv: list[str] | None = None) -> int:
     client = MarconeClient()
     try:
         print(f"Logging in to Marcone as {username}...")
-        client.login(username=username, password=password, customer_number=account_number)
+        client.login(
+            username=username, password=password, customer_number=account_number
+        )
     except AuthenticationError as exc:
         sys.stderr.write(f"Authentication failed: {exc}\n")
         return 2
