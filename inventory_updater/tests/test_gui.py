@@ -60,10 +60,16 @@ def test_main_window_init(qapp):
         return_value={"username": "testuser", "password": "pw"},
     ):
         window = MainWindow()
-        assert window.windowTitle() == "Tech2K Inventory Pricing Updater"
+        assert window.windowTitle() == "Tech 2000 Inventory Price Updater"
         assert window.table.columnCount() == 5
         assert "Marcone: testuser" in window.conn_chip.text()
         assert window.start_btn.isEnabled() is False
+        assert window.supplier_combo.isEditable()
+        assert window.supplier_combo.currentText() == "Marcone"
+        assert window.cb_blank_supplier.isChecked() is True
+        assert window.cb_missing_only.isChecked() is True
+        assert window.cb_dry_run.isChecked() is False
+        assert window.limit_spin.value() == 0
 
 
 def test_main_window_file_selection_and_options(qapp, test_excel_file):
@@ -72,9 +78,61 @@ def test_main_window_file_selection_and_options(qapp, test_excel_file):
         return_value={"username": "testuser", "password": "pw"},
     ):
         window = MainWindow()
-        window._on_file_selected(str(test_excel_file))
+        window.drop_area.set_file(str(test_excel_file))
         assert window.selected_file_path == test_excel_file
         assert window.start_btn.isEnabled() is True
+        # Check supplier combo population
+        items = [
+            window.supplier_combo.itemText(i)
+            for i in range(window.supplier_combo.count())
+        ]
+        assert "(All Suppliers - No Filter)" in items
+        assert "Marcone" in items
+        assert window.supplier_combo.currentText() == "Marcone"
+
+
+def test_main_window_supplier_filter_selection(qapp, tmp_path):
+    multi_vendor_file = tmp_path / "multi_vendor.xlsx"
+    wb = openpyxl.Workbook()
+    sheet = wb.active
+    sheet.title = "Items"
+    sheet.append(["Item #", "Cost", "Price", "Vendor"])
+    sheet.append(["PART-1", 10.0, 20.0, "Reliable"])
+    sheet.append(["PART-2", "", 0, "Encompass"])
+    sheet.append(["PART-3", "", 0, "Marcone"])
+    wb.save(multi_vendor_file)
+
+    with (
+        patch(
+            "inventory_updater.gui.load_credentials",
+            return_value={"username": "testuser", "password": "pw"},
+        ),
+        patch("inventory_updater.gui.UpdateWorker") as mock_worker_cls,
+    ):
+        window = MainWindow()
+        window.drop_area.set_file(str(multi_vendor_file))
+
+        items = [
+            window.supplier_combo.itemText(i)
+            for i in range(window.supplier_combo.count())
+        ]
+        assert items == [
+            "(All Suppliers - No Filter)",
+            "Encompass",
+            "Marcone",
+            "Reliable",
+        ]
+        assert window.supplier_combo.currentText() == "Marcone"
+
+        # Test selecting "(All Suppliers - No Filter)"
+        window.supplier_combo.setCurrentIndex(0)
+        window._on_start()
+        assert mock_worker_cls.call_args.kwargs["supplier_filter"] is None
+
+        # Test setting a custom typed filter
+        window.supplier_combo.setEditText("CustomVendor")
+        window._on_start()
+        assert mock_worker_cls.call_args.kwargs["supplier_filter"] == "CustomVendor"
 
 
 def test_main_window_progress_and_row_results(qapp):
@@ -135,6 +193,7 @@ def test_update_worker_init_and_cancel(qapp, tmp_path):
         username="user",
         password="pwd",
     )
+    assert worker.workers == 3
     assert worker._is_cancelled is False
     worker.cancel()
     assert worker._is_cancelled is True

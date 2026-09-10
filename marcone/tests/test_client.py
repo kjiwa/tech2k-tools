@@ -1,4 +1,5 @@
 import pytest
+import requests
 import requests_mock
 from marcone.client import MarconeClient
 from marcone.exceptions import (
@@ -177,5 +178,33 @@ def test_lookup_part_empty_input(client: MarconeClient):
         client.lookup_part("   ")
 
 
+def test_request_network_error(client: MarconeClient):
+    with requests_mock.Mocker() as m:
+        m.get("https://test.marcone.com/test", exc=requests.exceptions.ConnectTimeout)
         with pytest.raises(NetworkError):
-            client.login("user@example.com", "secret")
+            client._request("GET", "/test", retries=1)
+
+
+
+def test_concurrent_lookups_thread_safety(client: MarconeClient):
+    from concurrent.futures import ThreadPoolExecutor
+
+    makes_html = "<select><option value='WPL'>WPL</option></select>"
+    detail_html = """
+    <tr id="trPrice"><td class="priceblock_ourprice">$12.50</td></tr>
+    <tr id="trListPrice"><td class="green"><b>$21.00</b></td></tr>
+    """
+    with requests_mock.Mocker() as m:
+        m.post("https://test.marcone.com/Home/GetCartLookupParts", json={"Result": True, "Message": makes_html})
+        m.post("https://test.marcone.com/Product/GetCustomerPrice", text="$12.50")
+        m.get("https://test.marcone.com/Product/Detail", text=detail_html)
+
+        parts = [f"PART{i}" for i in range(10)]
+        with ThreadPoolExecutor(max_workers=4) as executor:
+            results = list(executor.map(client.lookup_part, parts))
+
+        assert len(results) == 10
+        for i, res in enumerate(results):
+            assert res.part_number == f"PART{i}"
+            assert res.customer_cost == 12.50
+        client.close()

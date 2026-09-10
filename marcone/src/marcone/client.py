@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import contextlib
 import logging
 import re
+import threading
 import time
 from types import TracebackType
 from typing import Any
@@ -54,6 +56,11 @@ class MarconeClient:
         )
         self._is_logged_in = False
         self._last_request_time: float = 0.0
+        self._owner_thread = threading.get_ident()
+        self._local = threading.local()
+        self._session_lock = threading.Lock()
+        self._throttle_lock = threading.Lock()
+        self._created_sessions: list[requests.Session] = []
 
     def __enter__(self) -> Self:
         return self
@@ -66,18 +73,39 @@ class MarconeClient:
     ) -> None:
         self.close()
 
-
     def close(self) -> None:
         """Close the underlying HTTP session."""
         self.session.close()
+        with self._session_lock:
+            for s in self._created_sessions:
+                with contextlib.suppress(Exception):
+                    s.close()
+            self._created_sessions.clear()
+
+    def _get_session(self) -> requests.Session:
+        """Return a thread-safe Session instance for the calling thread."""
+        if threading.get_ident() == self._owner_thread:
+            return self.session
+        sess = getattr(self._local, "session", None)
+        if sess is None:
+            sess = requests.Session()
+            sess.headers.update(self.session.headers)
+            with self._session_lock:
+                sess.cookies.update(self.session.cookies)
+                self._created_sessions.append(sess)
+            self._local.session = sess
+        return sess
 
     def _throttle(self) -> None:
-        """Enforce request spacing to avoid overwhelming the server."""
-        if self.throttle_seconds > 0:
-            elapsed = time.time() - self._last_request_time
+        """Enforce request spacing across all threads to avoid overwhelming the server."""
+        if self.throttle_seconds <= 0:
+            return
+        with self._throttle_lock:
+            now = time.monotonic()
+            elapsed = now - self._last_request_time
             if elapsed < self.throttle_seconds:
                 time.sleep(self.throttle_seconds - elapsed)
-        self._last_request_time = time.time()
+            self._last_request_time = time.monotonic()
 
     def _request(
         self,
@@ -94,7 +122,8 @@ class MarconeClient:
         for attempt in range(retries):
             self._throttle()
             try:
-                response = self.session.request(method, url, **kwargs)
+                session = self._get_session()
+                response = session.request(method, url, **kwargs)
                 if response.status_code == 429:
                     retry_after = float(response.headers.get("Retry-After", 2.0))
                     logger.warning("Rate limited (429). Retrying after %.1f seconds...", retry_after)

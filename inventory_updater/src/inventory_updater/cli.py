@@ -82,6 +82,13 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
         help="Limit number of parts updated (useful for testing)",
     )
     parser.add_argument(
+        "--workers",
+        "-w",
+        type=int,
+        default=3,
+        help="Number of concurrent lookup worker threads (default: 3)",
+    )
+    parser.add_argument(
         "--cache-file",
         default=".cache/marcone_prices.sqlite",
         help="SQLite cache file path (default: .cache/marcone_prices.sqlite)",
@@ -172,6 +179,7 @@ def main(argv: list[str] | None = None) -> int:
         client=client,
         cache=cache,
         cache_ttl_seconds=args.cache_ttl_days * 86400,
+        workers=args.workers,
     )
 
     def progress_callback(current: int, total: int, part_no: str) -> None:

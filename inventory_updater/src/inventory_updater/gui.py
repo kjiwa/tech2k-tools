@@ -14,9 +14,11 @@ from PySide6.QtGui import QColor, QDesktopServices, QDragEnterEvent, QDropEvent,
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QComboBox,
     QDialog,
     QFileDialog,
     QFrame,
+    QGridLayout,
     QGroupBox,
     QHBoxLayout,
     QHeaderView,
@@ -73,6 +75,7 @@ class UpdateWorker(QThread):
         account_number: str = "",
         cache_file: str = ".cache/marcone_prices.sqlite",
         cache_ttl_days: float = 7.0,
+        workers: int = 3,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -89,6 +92,7 @@ class UpdateWorker(QThread):
         self.account_number = account_number
         self.cache_file = cache_file
         self.cache_ttl_days = cache_ttl_days
+        self.workers = workers
         self._is_cancelled = False
 
     def cancel(self) -> None:
@@ -110,6 +114,7 @@ class UpdateWorker(QThread):
                 client=client,
                 cache=cache,
                 cache_ttl_seconds=self.cache_ttl_days * 86400,
+                workers=self.workers,
             )
 
             def on_progress(cur: int, tot: int, part: str) -> None:
@@ -320,6 +325,8 @@ class FileDropArea(QFrame):
             """
         )
 
+        self.file_info: dict[str, Any] | None = None
+
         self.layout = QVBoxLayout(self)
         self.layout.setSpacing(10)
         self.layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -440,6 +447,7 @@ class FileDropArea(QFrame):
         path = Path(file_path)
         try:
             info = get_file_info(path)
+            self.file_info = info
             self.empty_widget.setVisible(False)
             self.selected_widget.setVisible(True)
 
@@ -477,7 +485,7 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("Tech2K Inventory Pricing Updater")
+        self.setWindowTitle("Tech 2000 Inventory Price Updater")
         self.resize(980, 750)
         self.setMinimumSize(820, 600)
 
@@ -498,7 +506,7 @@ class MainWindow(QMainWindow):
         header_row = QHBoxLayout()
         title_box = QVBoxLayout()
         title_box.setSpacing(2)
-        app_title = QLabel("Tech2K Inventory Pricing Updater")
+        app_title = QLabel("Tech 2000 Inventory Price Updater")
         app_title.setStyleSheet("font-size: 18px; font-weight: 700; color: #0f172a;")
         app_sub = QLabel(
             "Sync Excel inventory spreadsheets with live wholesale pricing from Marcone"
@@ -524,49 +532,120 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.drop_area)
 
         options_group = QGroupBox("Update Options")
-        options_layout = QVBoxLayout(options_group)
-        options_layout.setSpacing(10)
-        options_layout.setContentsMargins(16, 16, 16, 14)
+        options_layout = QGridLayout(options_group)
+        options_layout.setVerticalSpacing(12)
+        options_layout.setHorizontalSpacing(16)
+        options_layout.setContentsMargins(16, 16, 16, 16)
+
+        def make_row_label(text: str) -> QLabel:
+            lbl = QLabel(text)
+            lbl.setStyleSheet("font-weight: 600; color: #334155; min-width: 105px;")
+            return lbl
 
         dest_row = QHBoxLayout()
-        dest_row.addWidget(QLabel("Output file:"))
         self.radio_new_file = QRadioButton("Save to new file (<name>_updated.xlsx)")
         self.radio_new_file.setChecked(True)
+        self.radio_new_file.setToolTip(
+            "Create a new Excel file with '_updated' appended to the filename, preserving original data."
+        )
         self.radio_overwrite = QRadioButton("Overwrite original spreadsheet")
+        self.radio_overwrite.setToolTip(
+            "Directly update the original Excel file in place (corresponds to --in-place in CLI)."
+        )
         dest_row.addWidget(self.radio_new_file)
+        dest_row.addSpacing(24)
         dest_row.addWidget(self.radio_overwrite)
         dest_row.addStretch(1)
-        options_layout.addLayout(dest_row)
-
-        opts_row = QHBoxLayout()
-        self.cb_missing_only = QCheckBox("Only update missing prices (blank or zero)")
-        self.cb_missing_only.setChecked(True)
-        self.cb_dry_run = QCheckBox("Dry run (Preview changes without writing)")
-        opts_row.addWidget(self.cb_missing_only)
-        opts_row.addWidget(self.cb_dry_run)
-        opts_row.addStretch(1)
-        options_layout.addLayout(opts_row)
+        options_layout.addWidget(
+            make_row_label("Output file:"),
+            0,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+        options_layout.addLayout(dest_row, 0, 1)
 
         filter_row = QHBoxLayout()
-        filter_row.addWidget(QLabel("Supplier filter:"))
-        self.supplier_input = QLineEdit("Marcone")
-        self.supplier_input.setFixedWidth(120)
-        filter_row.addWidget(self.supplier_input)
+        self.supplier_combo = QComboBox()
+        self.supplier_combo.setEditable(True)
+        self.supplier_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.supplier_combo.setFixedWidth(220)
+        self.supplier_combo.lineEdit().setPlaceholderText("Filter or type vendor...")
+        self.supplier_combo.addItem("(All Suppliers - No Filter)")
+        self.supplier_combo.addItem("Marcone")
+        self.supplier_combo.setCurrentText("Marcone")
+        self.supplier_combo.setToolTip(
+            "Only update parts where the vendor matches this text (case-insensitive).\n"
+            "Pick from detected spreadsheet vendors or type a custom filter (corresponds to --supplier-filter in CLI)."
+        )
+        self.supplier_input = self.supplier_combo.lineEdit()
+
+        filter_row.addWidget(self.supplier_combo)
+        filter_row.addSpacing(24)
 
         self.cb_blank_supplier = QCheckBox("Allow blank suppliers")
         self.cb_blank_supplier.setChecked(True)
+        self.cb_blank_supplier.setToolTip(
+            "When checked, rows with an empty vendor column are also updated.\n"
+            "Uncheck to only update items with an explicit vendor match (corresponds to --no-allow-blank-supplier in CLI)."
+        )
         filter_row.addWidget(self.cb_blank_supplier)
+        filter_row.addStretch(1)
+        options_layout.addWidget(
+            make_row_label("Supplier filter:"),
+            1,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+        options_layout.addLayout(filter_row, 1, 1)
 
-        filter_row.addSpacing(20)
-        filter_row.addWidget(QLabel("Row limit (0 = all):"))
+        limit_row = QHBoxLayout()
         self.limit_spin = QSpinBox()
         self.limit_spin.setRange(0, 100000)
         self.limit_spin.setValue(0)
-        self.limit_spin.setFixedWidth(80)
-        filter_row.addWidget(self.limit_spin)
-        filter_row.addStretch(1)
+        self.limit_spin.setFixedWidth(90)
+        self.limit_spin.setToolTip(
+            "Cap the number of updated items (0 = all rows).\n"
+            "Useful for testing a small batch before running full catalog (corresponds to --limit in CLI)."
+        )
+        limit_row.addWidget(self.limit_spin)
+        limit_row.addSpacing(10)
+        lbl_limit_help = QLabel("(0 = update all matching rows)")
+        lbl_limit_help.setStyleSheet("color: #64748b; font-size: 11px;")
+        limit_row.addWidget(lbl_limit_help)
+        limit_row.addStretch(1)
+        options_layout.addWidget(
+            make_row_label("Row limit:"),
+            2,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+        options_layout.addLayout(limit_row, 2, 1)
 
-        options_layout.addLayout(filter_row)
+        rules_row = QHBoxLayout()
+        self.cb_missing_only = QCheckBox("Only update missing prices (blank or zero)")
+        self.cb_missing_only.setChecked(True)
+        self.cb_missing_only.setToolTip(
+            "Only look up parts where cost or price is currently empty or $0.00.\n"
+            "Existing pricing will be preserved (corresponds to --only-missing in CLI)."
+        )
+        rules_row.addWidget(self.cb_missing_only)
+        rules_row.addSpacing(28)
+
+        self.cb_dry_run = QCheckBox("Dry run (Preview changes without writing)")
+        self.cb_dry_run.setChecked(False)
+        self.cb_dry_run.setToolTip(
+            "Look up parts and preview changes in the table below without modifying any files (corresponds to --dry-run in CLI)."
+        )
+        rules_row.addWidget(self.cb_dry_run)
+        rules_row.addStretch(1)
+        options_layout.addWidget(
+            make_row_label("Update rules:"),
+            3,
+            0,
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+        )
+        options_layout.addLayout(rules_row, 3, 1)
+
         main_layout.addWidget(options_group)
 
         # Action Buttons
@@ -672,12 +751,37 @@ class MainWindow(QMainWindow):
 
     def _on_file_selected(self, file_path: str) -> None:
         self.selected_file_path = Path(file_path)
+        self._populate_suppliers()
         creds = load_credentials()
         if creds.get("username") and creds.get("password"):
             self.start_btn.setEnabled(True)
         else:
             self.start_btn.setEnabled(False)
             self._open_credentials()
+
+    def _populate_suppliers(self) -> None:
+        if not self.drop_area.file_info:
+            return
+        suppliers = self.drop_area.file_info.get("suppliers", [])
+        current_text = self.supplier_combo.currentText().strip()
+
+        self.supplier_combo.blockSignals(True)
+        self.supplier_combo.clear()
+        self.supplier_combo.addItem("(All Suppliers - No Filter)")
+        for s in suppliers:
+            self.supplier_combo.addItem(s)
+        if "Marcone" not in suppliers:
+            self.supplier_combo.addItem("Marcone")
+
+        if current_text and current_text not in ("(All Suppliers - No Filter)", ""):
+            self.supplier_combo.setCurrentText(current_text)
+        elif "Marcone" in suppliers or "Marcone" in [
+            self.supplier_combo.itemText(i) for i in range(self.supplier_combo.count())
+        ]:
+            self.supplier_combo.setCurrentText("Marcone")
+        else:
+            self.supplier_combo.setCurrentIndex(0)
+        self.supplier_combo.blockSignals(False)
 
     def _on_start(self) -> None:
         if not self.selected_file_path:
@@ -707,7 +811,11 @@ class MainWindow(QMainWindow):
         self.lbl_skipped.setText("Skipped: 0")
         self.lbl_errors.setText("Errors: 0")
 
-        supplier_filter = self.supplier_input.text().strip() or None
+        supplier_raw = self.supplier_combo.currentText().strip()
+        if not supplier_raw or supplier_raw.startswith("(All"):
+            supplier_filter = None
+        else:
+            supplier_filter = supplier_raw
         limit_val = self.limit_spin.value() or None
 
         self.worker = UpdateWorker(
@@ -839,6 +947,8 @@ class MainWindow(QMainWindow):
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the GUI application."""
     app = QApplication(argv or sys.argv)
+    app.setApplicationName("Tech 2000 Inventory Price Updater")
+    app.setApplicationDisplayName("Tech 2000 Inventory Price Updater")
     app.setStyleSheet(MAIN_STYLESHEET)
     window = MainWindow()
     window.show()

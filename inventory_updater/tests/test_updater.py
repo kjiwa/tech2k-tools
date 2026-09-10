@@ -486,6 +486,7 @@ def test_get_file_info(sample_excel):
     assert info["has_cost_col"] is True
     assert info["has_price_col"] is True
     assert info["has_supplier_col"] is True
+    assert info["suppliers"] == ["Marcone"]
 
 
 def test_updater_row_callback_and_cancellation(tmp_path, sample_excel):
@@ -520,3 +521,61 @@ def test_updater_row_callback_and_cancellation(tmp_path, sample_excel):
     assert row_results[0].status == "updated"
     assert row_results[0].new_cost == 15.25
     assert row_results[0].new_price == 27.50
+
+
+def test_updater_multi_worker_and_deduplication(tmp_path):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Part Number", "Supplier Cost", "Unit Price", "Supplier"])
+    # 6 rows with 2 distinct parts
+    for _ in range(3):
+        ws.append(["PART_A", None, None, "Marcone"])
+        ws.append(["PART_B", None, None, "Marcone"])
+    file_path = tmp_path / "repeated_parts.xlsx"
+    wb.save(file_path)
+
+    mock_client = MagicMock(spec=MarconeClient)
+    mock_client.lookup_part.side_effect = lambda p: PartPricing(
+        part_number=p,
+        customer_cost=10.0 if p == "PART_A" else 20.0,
+        list_price=15.0 if p == "PART_A" else 25.0,
+    )
+
+    cache = PriceCache(db_path=str(tmp_path / "cache.sqlite"))
+    updater = InventoryUpdater(client=mock_client, cache=cache, workers=4)
+
+    out_path = tmp_path / "repeated_parts_out.xlsx"
+    stats = updater.update_file(input_file=file_path, output_file=out_path)
+
+    assert stats.total_rows == 6
+    assert stats.updated == 6
+    # Each unique part queried only once
+    assert mock_client.lookup_part.call_count == 2
+
+    # Verify cached
+    assert cache.get("PART_A").customer_cost == 10.0
+    assert cache.get("PART_B").customer_cost == 20.0
+
+
+def test_updater_cache_batching_avoids_lookups(tmp_path):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Part Number", "Supplier Cost", "Unit Price", "Supplier"])
+    ws.append(["CACHED_1", None, None, "Marcone"])
+    ws.append(["CACHED_2", None, None, "Marcone"])
+    file_path = tmp_path / "cached_test.xlsx"
+    wb.save(file_path)
+
+    cache = PriceCache(db_path=str(tmp_path / "cache.sqlite"))
+    cache.set(PartPricing(part_number="CACHED_1", customer_cost=11.0, list_price=22.0))
+    cache.set(PartPricing(part_number="CACHED_2", customer_cost=33.0, list_price=44.0))
+
+    mock_client = MagicMock(spec=MarconeClient)
+    updater = InventoryUpdater(client=mock_client, cache=cache, workers=3)
+
+    out_path = tmp_path / "cached_out.xlsx"
+    stats = updater.update_file(input_file=file_path, output_file=out_path)
+
+    assert stats.total_rows == 2
+    assert stats.updated == 2
+    assert mock_client.lookup_part.call_count == 0

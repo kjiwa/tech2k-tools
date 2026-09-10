@@ -29,7 +29,7 @@ QGroupBox::title {
     color: #334155;
 }
 
-QLineEdit, QSpinBox {
+QLineEdit, QSpinBox, QComboBox {
     background-color: #ffffff;
     border: 1px solid #cbd5e1;
     border-radius: 6px;
@@ -38,9 +38,41 @@ QLineEdit, QSpinBox {
     selection-background-color: #2563eb;
 }
 
-QLineEdit:focus, QSpinBox:focus {
+QLineEdit:focus, QSpinBox:focus, QComboBox:focus {
     border: 1.5px solid #2563eb;
     background-color: #ffffff;
+}
+
+QComboBox {
+    padding-right: 24px;
+}
+
+QComboBox::drop-down {
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 24px;
+    border-left-width: 0px;
+    border-top-right-radius: 6px;
+    border-bottom-right-radius: 6px;
+}
+
+QComboBox::down-arrow {
+    image: none;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #64748b;
+    margin-right: 6px;
+}
+
+QComboBox QAbstractItemView {
+    background-color: #ffffff;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    selection-background-color: #eff6ff;
+    selection-color: #1d4ed8;
+    color: #0f172a;
+    padding: 4px;
+    outline: none;
 }
 
 QPushButton {

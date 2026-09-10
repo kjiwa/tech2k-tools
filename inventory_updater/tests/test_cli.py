@@ -12,6 +12,7 @@ def test_parse_args_defaults():
     assert args.cache_ttl_days == 7.0
     assert args.supplier_filter == "Marcone"
     assert args.allow_blank_supplier is True
+    assert args.workers == 3
 
 
 def test_parse_args_no_allow_blank_supplier():
@@ -31,6 +32,8 @@ def test_parse_args_custom():
             "10",
             "--set-supplier",
             "Marcone",
+            "--workers",
+            "5",
         ]
     )
     assert args.file == "custom.xlsx"
@@ -38,6 +41,7 @@ def test_parse_args_custom():
     assert args.dry_run is True
     assert args.limit == 10
     assert args.set_supplier == "Marcone"
+    assert args.workers == 5
 
 
 def test_main_missing_file(tmp_path):
