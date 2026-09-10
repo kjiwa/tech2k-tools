@@ -1,0 +1,23 @@
+[project]
+name = "tech2k-tools"
+version = "0.1.0"
+requires-python = ">=3.10"
+dependencies = [
+    "marcone",
+    "inventory-updater",
+]
+
+[tool.uv.workspace]
+members = ["marcone", "inventory_updater"]
+
+[tool.uv.sources]
+marcone = { workspace = true }
+inventory-updater = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+    "requests-mock>=1.12.0",
+    "ruff>=0.8.0",
+]
+
