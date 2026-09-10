@@ -81,4 +81,3 @@ def test_get_user_config_dir(monkeypatch):
     )
     env_path = get_default_env_path()
     assert env_path == mac_dir / ".env"
-

@@ -31,6 +31,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLayout,
     QLineEdit,
     QMainWindow,
     QMessageBox,
@@ -50,7 +51,10 @@ from inventory_updater.credentials import (
     load_credentials,
     save_credentials,
 )
-from inventory_updater.styles import MAIN_STYLESHEET
+from inventory_updater.styles import (
+    get_status_colors,
+    get_stylesheet,
+)
 from inventory_updater.updater import (
     InventoryUpdater,
     RowUpdateResult,
@@ -197,7 +201,7 @@ class CredentialsDialog(QDialog):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Marcone Credentials")
-        self.setMinimumWidth(440)
+        self.setMinimumWidth(460)
         self.test_worker: ConnectionTestWorker | None = None
 
         layout = QVBoxLayout(self)
@@ -205,41 +209,80 @@ class CredentialsDialog(QDialog):
         layout.setContentsMargins(20, 20, 20, 20)
 
         title_lbl = QLabel("Enter your Marcone Portal Credentials")
-        title_lbl.setStyleSheet("font-weight: 600; font-size: 14px; color: #0f172a;")
+        title_lbl.setProperty("role", "heading")
         layout.addWidget(title_lbl)
 
         desc_lbl = QLabel(
-            "These credentials are used to query wholesale pricing from Marcone."
+            "These credentials are used to query live wholesale pricing from Marcone."
         )
-        desc_lbl.setStyleSheet("color: #64748b; font-size: 12px;")
+        desc_lbl.setProperty("role", "caption")
         desc_lbl.setWordWrap(True)
         layout.addWidget(desc_lbl)
 
         form_layout = QVBoxLayout()
-        form_layout.setSpacing(8)
+        form_layout.setSpacing(10)
 
-        form_layout.addWidget(QLabel("Username or Email:"))
+        u_box = QVBoxLayout()
+        u_box.setSpacing(2)
+        lbl_user = QLabel("Account Number or Username:")
+        lbl_user.setProperty("role", "rowLabel")
         self.user_input = QLineEdit()
-        self.user_input.setPlaceholderText("e.g. user@example.com")
-        form_layout.addWidget(self.user_input)
+        self.user_input.setPlaceholderText("e.g. 123456 or user@example.com")
+        self.user_input.setToolTip(
+            "Enter your primary Marcone customer account number or portal login username."
+        )
+        user_cap = QLabel(
+            "Your Marcone customer account number or portal login username."
+        )
+        user_cap.setProperty("role", "caption")
+        user_cap.setWordWrap(True)
+        u_box.addWidget(lbl_user)
+        u_box.addWidget(self.user_input)
+        u_box.addWidget(user_cap)
+        form_layout.addLayout(u_box)
 
-        form_layout.addWidget(QLabel("Password:"))
+        p_box = QVBoxLayout()
+        p_box.setSpacing(2)
+        lbl_pass = QLabel("Password:")
+        lbl_pass.setProperty("role", "rowLabel")
         self.pass_input = QLineEdit()
         self.pass_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.pass_input.setPlaceholderText("Your Marcone password")
-        form_layout.addWidget(self.pass_input)
+        self.pass_input.setToolTip("Enter your Marcone portal account password.")
+        pass_cap = QLabel("Your Marcone portal account password.")
+        pass_cap.setProperty("role", "caption")
+        pass_cap.setWordWrap(True)
+        p_box.addWidget(lbl_pass)
+        p_box.addWidget(self.pass_input)
+        p_box.addWidget(pass_cap)
+        form_layout.addLayout(p_box)
 
-        form_layout.addWidget(QLabel("Account Number (Optional):"))
+        a_box = QVBoxLayout()
+        a_box.setSpacing(2)
+        lbl_acc = QLabel("Sub-Account / Ship-To (Optional):")
+        lbl_acc.setProperty("role", "rowLabel")
         self.acc_input = QLineEdit()
         self.acc_input.setPlaceholderText("Leave blank if not required")
-        form_layout.addWidget(self.acc_input)
+        self.acc_input.setToolTip(
+            "Optional customer sub-account or ship-to ID. Leave blank if your account has a single location."
+        )
+        acc_cap = QLabel(
+            "Only required for parent accounts that manage multiple ship-to location IDs."
+        )
+        acc_cap.setProperty("role", "caption")
+        acc_cap.setWordWrap(True)
+        a_box.addWidget(lbl_acc)
+        a_box.addWidget(self.acc_input)
+        a_box.addWidget(acc_cap)
+        form_layout.addLayout(a_box)
 
         layout.addLayout(form_layout)
 
         self.test_btn = QPushButton("Test Connection")
+        self.test_btn.setToolTip("Verify these credentials against Marcone servers.")
         self.test_btn.clicked.connect(self._on_test_connection)
         self.test_status_lbl = QLabel("")
-        self.test_status_lbl.setStyleSheet("font-size: 12px; font-weight: 500;")
+        self.test_status_lbl.setProperty("role", "caption")
         self.test_status_lbl.setWordWrap(True)
 
         test_row = QHBoxLayout()
@@ -247,9 +290,21 @@ class CredentialsDialog(QDialog):
         test_row.addWidget(self.test_status_lbl, 1)
         layout.addLayout(test_row)
 
+        rem_box = QVBoxLayout()
+        rem_box.setSpacing(2)
         self.remember_cb = QCheckBox("Save credentials to .env file")
         self.remember_cb.setChecked(True)
-        layout.addWidget(self.remember_cb)
+        self.remember_cb.setToolTip(
+            "Store credentials in local .env configuration so you don't have to re-enter them."
+        )
+        rem_cap = QLabel(
+            "Saves credentials locally in .env. Uncheck to keep credentials in memory for this session only."
+        )
+        rem_cap.setProperty("role", "caption")
+        rem_cap.setWordWrap(True)
+        rem_box.addWidget(self.remember_cb)
+        rem_box.addWidget(rem_cap)
+        layout.addLayout(rem_box)
 
         btn_row = QHBoxLayout()
         btn_row.addStretch(1)
@@ -278,12 +333,12 @@ class CredentialsDialog(QDialog):
 
         if not user or not pwd:
             self.test_status_lbl.setText("Enter username and password first.")
-            self.test_status_lbl.setStyleSheet("color: #dc2626; font-size: 12px;")
+            self.test_status_lbl.setStyleSheet("color: #dc2626;")
             return
 
         self.test_btn.setEnabled(False)
         self.test_status_lbl.setText("Testing connection...")
-        self.test_status_lbl.setStyleSheet("color: #2563eb; font-size: 12px;")
+        self.test_status_lbl.setStyleSheet("color: #2563eb;")
 
         self.test_worker = ConnectionTestWorker(user, pwd, acc, self)
         self.test_worker.result_signal.connect(self._on_test_result)
@@ -293,12 +348,10 @@ class CredentialsDialog(QDialog):
         self.test_btn.setEnabled(True)
         if success:
             self.test_status_lbl.setText("Login verified successfully!")
-            self.test_status_lbl.setStyleSheet(
-                "color: #16a34a; font-size: 12px; font-weight: 600;"
-            )
+            self.test_status_lbl.setStyleSheet("color: #16a34a; font-weight: 600;")
         else:
             self.test_status_lbl.setText(msg)
-            self.test_status_lbl.setStyleSheet("color: #dc2626; font-size: 12px;")
+            self.test_status_lbl.setStyleSheet("color: #dc2626;")
 
     def _on_save(self) -> None:
         user = self.user_input.text().strip()
@@ -322,6 +375,179 @@ class CredentialsDialog(QDialog):
         self.accept()
 
 
+class AdvancedSettingsDialog(QDialog):
+    """Modal dialog for configuring concurrency, throttling, and caching."""
+
+    def __init__(
+        self,
+        workers: int = 3,
+        throttle_seconds: float = 0.20,
+        cache_chunk_size: int = 500,
+        lookahead: int = 0,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Performance & Concurrency Settings")
+        self.setMinimumWidth(480)
+
+        layout = QVBoxLayout(self)
+        layout.setSpacing(14)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        title_lbl = QLabel("Performance & Concurrency Settings")
+        title_lbl.setProperty("role", "heading")
+        layout.addWidget(title_lbl)
+
+        desc_lbl = QLabel(
+            "Configure worker threads, network rate throttling, and cache batching for inventory updates."
+        )
+        desc_lbl.setProperty("role", "caption")
+        desc_lbl.setWordWrap(True)
+        layout.addWidget(desc_lbl)
+
+        form_layout = QGridLayout()
+        form_layout.setVerticalSpacing(12)
+        form_layout.setHorizontalSpacing(14)
+
+        lbl_workers = QLabel("Worker Threads:")
+        lbl_workers.setProperty("role", "rowLabel")
+        self.workers_spin = QSpinBox()
+        self.workers_spin.setRange(1, 16)
+        self.workers_spin.setValue(workers)
+        self.workers_spin.setFixedWidth(80)
+        self.workers_spin.setToolTip(
+            "Number of parallel worker threads querying Marcone (corresponds to --workers in CLI)."
+        )
+        workers_box = QVBoxLayout()
+        w_row = QHBoxLayout()
+        w_row.addWidget(self.workers_spin)
+        w_suffix = QLabel("threads (default: 3)")
+        w_suffix.setProperty("role", "caption")
+        w_row.addWidget(w_suffix)
+        w_row.addStretch(1)
+        workers_box.addLayout(w_row)
+        workers_cap = QLabel(
+            "Number of simultaneous requests to Marcone. Higher values speed up large catalogs but increase network load."
+        )
+        workers_cap.setProperty("role", "caption")
+        workers_cap.setWordWrap(True)
+        workers_box.addWidget(workers_cap)
+
+        form_layout.addWidget(lbl_workers, 0, 0, Qt.AlignmentFlag.AlignTop)
+        form_layout.addLayout(workers_box, 0, 1)
+
+        lbl_throttle = QLabel("Request Throttle:")
+        lbl_throttle.setProperty("role", "rowLabel")
+        self.throttle_spin = QDoubleSpinBox()
+        self.throttle_spin.setRange(0.0, 5.0)
+        self.throttle_spin.setSingleStep(0.05)
+        self.throttle_spin.setDecimals(2)
+        self.throttle_spin.setValue(throttle_seconds)
+        self.throttle_spin.setSuffix(" s")
+        self.throttle_spin.setFixedWidth(80)
+        self.throttle_spin.setToolTip(
+            "Minimum delay between HTTP requests across all threads (corresponds to --throttle in CLI)."
+        )
+        throttle_box = QVBoxLayout()
+        t_row = QHBoxLayout()
+        t_row.addWidget(self.throttle_spin)
+        t_suffix = QLabel("delay (default: 0.20 s)")
+        t_suffix.setProperty("role", "caption")
+        t_row.addWidget(t_suffix)
+        t_row.addStretch(1)
+        throttle_box.addLayout(t_row)
+        throttle_cap = QLabel(
+            "Enforces a minimum pause between requests to prevent triggering rate limits or bans from Marcone."
+        )
+        throttle_cap.setProperty("role", "caption")
+        throttle_cap.setWordWrap(True)
+        throttle_box.addWidget(throttle_cap)
+
+        form_layout.addWidget(lbl_throttle, 1, 0, Qt.AlignmentFlag.AlignTop)
+        form_layout.addLayout(throttle_box, 1, 1)
+
+        lbl_batch = QLabel("Cache Batch Size:")
+        lbl_batch.setProperty("role", "rowLabel")
+        self.batch_spin = QSpinBox()
+        self.batch_spin.setRange(50, 2000)
+        self.batch_spin.setSingleStep(50)
+        self.batch_spin.setValue(cache_chunk_size)
+        self.batch_spin.setFixedWidth(80)
+        self.batch_spin.setToolTip(
+            "Number of items per SQLite cache query chunk (corresponds to --cache-chunk-size in CLI)."
+        )
+        batch_box = QVBoxLayout()
+        b_row = QHBoxLayout()
+        b_row.addWidget(self.batch_spin)
+        b_suffix = QLabel("items (default: 500)")
+        b_suffix.setProperty("role", "caption")
+        b_row.addWidget(b_suffix)
+        b_row.addStretch(1)
+        batch_box.addLayout(b_row)
+        batch_cap = QLabel(
+            "Number of rows fetched per SQLite query when checking local cache before sending web requests."
+        )
+        batch_cap.setProperty("role", "caption")
+        batch_cap.setWordWrap(True)
+        batch_box.addWidget(batch_cap)
+
+        form_layout.addWidget(lbl_batch, 2, 0, Qt.AlignmentFlag.AlignTop)
+        form_layout.addLayout(batch_box, 2, 1)
+
+        lbl_lookahead = QLabel("Prefetch Window:")
+        lbl_lookahead.setProperty("role", "rowLabel")
+        self.lookahead_spin = QSpinBox()
+        self.lookahead_spin.setRange(0, 500)
+        self.lookahead_spin.setSingleStep(10)
+        self.lookahead_spin.setValue(lookahead)
+        self.lookahead_spin.setFixedWidth(80)
+        self.lookahead_spin.setToolTip(
+            "Number of upcoming rows to pre-queue for worker threads (0 = auto-calculate from thread count)."
+        )
+        lookahead_box = QVBoxLayout()
+        l_row = QHBoxLayout()
+        l_row.addWidget(self.lookahead_spin)
+        l_suffix = QLabel("rows (0 = auto)")
+        l_suffix.setProperty("role", "caption")
+        l_row.addWidget(l_suffix)
+        l_row.addStretch(1)
+        lookahead_box.addLayout(l_row)
+        lookahead_cap = QLabel(
+            "Controls buffer depth for feeding worker threads. 0 automatically scales with thread count."
+        )
+        lookahead_cap.setProperty("role", "caption")
+        lookahead_cap.setWordWrap(True)
+        lookahead_box.addWidget(lookahead_cap)
+
+        form_layout.addWidget(lbl_lookahead, 3, 0, Qt.AlignmentFlag.AlignTop)
+        form_layout.addLayout(lookahead_box, 3, 1)
+
+        layout.addLayout(form_layout)
+
+        btn_row = QHBoxLayout()
+        self.reset_btn = QPushButton("Reset Defaults")
+        self.reset_btn.setToolTip("Reset all settings to recommended default values.")
+        self.reset_btn.clicked.connect(self._reset_defaults)
+        btn_row.addWidget(self.reset_btn)
+
+        btn_row.addStretch(1)
+        self.cancel_btn = QPushButton("Cancel")
+        self.cancel_btn.clicked.connect(self.reject)
+        self.save_btn = QPushButton("Save")
+        self.save_btn.setObjectName("primaryBtn")
+        self.save_btn.clicked.connect(self.accept)
+
+        btn_row.addWidget(self.cancel_btn)
+        btn_row.addWidget(self.save_btn)
+        layout.addLayout(btn_row)
+
+    def _reset_defaults(self) -> None:
+        self.workers_spin.setValue(3)
+        self.throttle_spin.setValue(0.20)
+        self.batch_spin.setValue(500)
+        self.lookahead_spin.setValue(0)
+
+
 class FileDropArea(QFrame):
     """Drag-and-drop zone and file picker card."""
 
@@ -331,24 +557,11 @@ class FileDropArea(QFrame):
         super().__init__(parent)
         self.setAcceptDrops(True)
         self.setObjectName("dropArea")
-        self.setStyleSheet(
-            """
-            #dropArea {
-                border: 2px dashed #94a3b8;
-                border-radius: 10px;
-                background-color: #ffffff;
-                padding: 18px;
-            }
-            #dropArea:hover {
-                border-color: #2563eb;
-                background-color: #f8fafc;
-            }
-            """
-        )
 
         self.file_info: dict[str, Any] | None = None
 
         self.layout = QVBoxLayout(self)
+        self.layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
         self.layout.setSpacing(10)
         self.layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
@@ -366,17 +579,19 @@ class FileDropArea(QFrame):
 
         prompt_lbl = QLabel("Drag & drop an inventory spreadsheet here (.xlsx)")
         prompt_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        prompt_lbl.setStyleSheet("font-size: 14px; font-weight: 600; color: #1e293b;")
+        prompt_lbl.setProperty("role", "heading")
         empty_layout.addWidget(prompt_lbl)
 
         sub_lbl = QLabel("or select a file from your computer")
         sub_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        sub_lbl.setStyleSheet("font-size: 12px; color: #64748b;")
+        sub_lbl.setProperty("role", "subtitle")
         empty_layout.addWidget(sub_lbl)
 
         self.browse_btn = QPushButton("Browse Files...")
         self.browse_btn.setFixedWidth(140)
-        self.browse_btn.setStyleSheet("margin-top: 4px; padding: 8px 16px;")
+        self.browse_btn.setToolTip(
+            "Choose an Excel spreadsheet (.xlsx) from your computer."
+        )
         self.browse_btn.clicked.connect(self._on_browse)
         empty_layout.addWidget(self.browse_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -389,24 +604,25 @@ class FileDropArea(QFrame):
 
         sel_top_row = QHBoxLayout()
         self.file_name_lbl = QLabel("")
-        self.file_name_lbl.setStyleSheet(
-            "font-size: 15px; font-weight: 700; color: #0f172a;"
-        )
+        self.file_name_lbl.setProperty("role", "heading")
         sel_top_row.addWidget(self.file_name_lbl, 1)
 
         self.change_btn = QPushButton("Change File")
+        self.change_btn.setToolTip("Select a different inventory spreadsheet.")
         self.change_btn.clicked.connect(self._on_browse)
         sel_top_row.addWidget(self.change_btn)
         sel_layout.addLayout(sel_top_row)
 
         self.file_path_lbl = QLabel("")
-        self.file_path_lbl.setStyleSheet("font-size: 11px; color: #64748b;")
+        self.file_path_lbl.setProperty("role", "caption")
         sel_layout.addWidget(self.file_path_lbl)
 
         self.badges_layout = QHBoxLayout()
         self.badges_layout.setSpacing(8)
         self.row_badge = QLabel("")
+        self.row_badge.setObjectName("fileBadgeRow")
         self.col_badge = QLabel("")
+        self.col_badge.setObjectName("fileBadgeColOk")
         self.badges_layout.addWidget(self.row_badge)
         self.badges_layout.addWidget(self.col_badge)
         self.badges_layout.addStretch(1)
@@ -419,32 +635,14 @@ class FileDropArea(QFrame):
             urls = event.mimeData().urls()
             if any(u.toLocalFile().lower().endswith((".xlsx", ".xslx")) for u in urls):
                 event.acceptProposedAction()
-                self.setStyleSheet(
-                    """
-                    #dropArea {
-                        border: 2px dashed #2563eb;
-                        border-radius: 10px;
-                        background-color: #eff6ff;
-                        padding: 18px;
-                    }
-                    """
-                )
+                self.setProperty("dragOver", True)
+                self.style().unpolish(self)
+                self.style().polish(self)
 
     def dragLeaveEvent(self, event: Any) -> None:
-        self.setStyleSheet(
-            """
-            #dropArea {
-                border: 2px dashed #94a3b8;
-                border-radius: 10px;
-                background-color: #ffffff;
-                padding: 18px;
-            }
-            #dropArea:hover {
-                border-color: #2563eb;
-                background-color: #f8fafc;
-            }
-            """
-        )
+        self.setProperty("dragOver", False)
+        self.style().unpolish(self)
+        self.style().polish(self)
 
     def dropEvent(self, event: QDropEvent) -> None:
         self.dragLeaveEvent(None)
@@ -466,23 +664,21 @@ class FileDropArea(QFrame):
 
     def _update_badges(self, info: dict[str, Any]) -> None:
         self.row_badge.setText(f"✓ {info['row_count']:,} items")
-        self.row_badge.setStyleSheet(
-            "background-color: #dcfce7; color: #166534; padding: 3px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;"
-        )
+        self.row_badge.setObjectName("fileBadgeRow")
+        self.row_badge.style().unpolish(self.row_badge)
+        self.row_badge.style().polish(self.row_badge)
 
         cols_verified = info["has_part_col"] and (
             info["has_cost_col"] or info["has_price_col"]
         )
         if cols_verified:
             self.col_badge.setText("✓ Columns detected")
-            self.col_badge.setStyleSheet(
-                "background-color: #e0f2fe; color: #0369a1; padding: 3px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;"
-            )
+            self.col_badge.setObjectName("fileBadgeColOk")
         else:
             self.col_badge.setText("⚠ Missing part/price columns")
-            self.col_badge.setStyleSheet(
-                "background-color: #fee2e2; color: #991b1b; padding: 3px 8px; border-radius: 4px; font-weight: 600; font-size: 11px;"
-            )
+            self.col_badge.setObjectName("fileBadgeColWarn")
+        self.col_badge.style().unpolish(self.col_badge)
+        self.col_badge.style().polish(self.col_badge)
 
     def set_file(self, file_path: str) -> None:
         path = Path(file_path)
@@ -509,7 +705,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Tech 2000 Inventory Price Updater")
         self.resize(980, 750)
-        self.setMinimumSize(820, 600)
+        self.setMinimumSize(800, 640)
 
         app_icon = self._load_app_icon()
         if not app_icon.isNull():
@@ -519,8 +715,56 @@ class MainWindow(QMainWindow):
         self.output_file_path: Path | None = None
         self.worker: UpdateWorker | None = None
 
+        self.adv_dialog = AdvancedSettingsDialog(parent=self)
+        self.workers_spin = self.adv_dialog.workers_spin
+        self.throttle_spin = self.adv_dialog.throttle_spin
+        self.batch_spin = self.adv_dialog.batch_spin
+        self.lookahead_spin = self.adv_dialog.lookahead_spin
+
+        app = QApplication.instance()
+        if app and hasattr(app, "styleHints") and hasattr(Qt, "ColorScheme"):
+            hints = app.styleHints()
+            if hasattr(hints, "colorSchemeChanged"):
+                hints.colorSchemeChanged.connect(self._on_color_scheme_changed)
+
         self._init_ui()
+        self._apply_theme()
         self._update_connection_chip()
+
+    @staticmethod
+    def _is_dark_mode() -> bool:
+        app = QApplication.instance()
+        if app and hasattr(app, "styleHints") and hasattr(Qt, "ColorScheme"):
+            hints = app.styleHints()
+            if hasattr(hints, "colorScheme"):
+                return hints.colorScheme() == Qt.ColorScheme.Dark
+        return False
+
+    def _on_color_scheme_changed(self, _scheme: Any = None) -> None:
+        self._apply_theme()
+
+    def _apply_theme(self) -> None:
+        app = QApplication.instance()
+        is_dark = self._is_dark_mode()
+        if app:
+            app.setStyleSheet(get_stylesheet(dark=is_dark))
+        if hasattr(self, "table"):
+            for r in range(self.table.rowCount()):
+                status_item = self.table.item(r, 2)
+                if status_item:
+                    status_item.setForeground(self._status_color(status_item.text()))
+
+    def _status_color(self, status: str) -> QColor:
+        status_key = status.strip().lower().replace(" ", "_")
+        colors = get_status_colors(self._is_dark_mode())
+        hex_color = colors.get(
+            status_key,
+            "#94a3b8" if self._is_dark_mode() else "#64748b",
+        )
+        return QColor(hex_color)
+
+    def _open_advanced(self) -> None:
+        self.adv_dialog.exec()
 
     @staticmethod
     def _load_app_icon() -> QIcon:
@@ -551,38 +795,53 @@ class MainWindow(QMainWindow):
         title_box = QVBoxLayout()
         title_box.setSpacing(2)
         app_title = QLabel("Tech 2000 Inventory Price Updater")
-        app_title.setStyleSheet("font-size: 18px; font-weight: 700; color: #0f172a;")
+        app_title.setProperty("role", "title")
         app_sub = QLabel(
             "Sync Excel inventory spreadsheets with live wholesale pricing from Marcone"
         )
-        app_sub.setStyleSheet("font-size: 12px; color: #64748b;")
+        app_sub.setProperty("role", "subtitle")
         title_box.addWidget(app_title)
         title_box.addWidget(app_sub)
         header_row.addLayout(title_box, 1)
 
         self.conn_chip = QLabel("○ Marcone: Not configured")
-        self.conn_chip.setStyleSheet(
-            "padding: 5px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; background-color: #f1f5f9; color: #64748b;"
-        )
+        self.conn_chip.setObjectName("connChipUnconfigured")
         self.creds_btn = QPushButton("Credentials...")
+        self.creds_btn.setToolTip("View or update Marcone portal login credentials.")
         self.creds_btn.clicked.connect(self._open_credentials)
+
+        self.adv_btn = QPushButton("Advanced...")
+        self.adv_btn.setToolTip(
+            "Configure worker threads, network throttling delay, and cache batch size."
+        )
+        self.adv_btn.clicked.connect(self._open_advanced)
 
         header_row.addWidget(self.conn_chip)
         header_row.addWidget(self.creds_btn)
+        header_row.addWidget(self.adv_btn)
         return header_row
 
     def _build_options_group(self) -> QGroupBox:
         options_group = QGroupBox("Update Options")
         options_layout = QGridLayout(options_group)
-        options_layout.setVerticalSpacing(12)
+        options_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        options_layout.setVerticalSpacing(10)
         options_layout.setHorizontalSpacing(16)
-        options_layout.setContentsMargins(16, 16, 16, 16)
+        options_layout.setContentsMargins(16, 14, 16, 14)
 
         def make_row_label(text: str) -> QLabel:
             lbl = QLabel(text)
-            lbl.setStyleSheet("font-weight: 600; color: #334155; min-width: 105px;")
+            lbl.setProperty("role", "rowLabel")
             return lbl
 
+        def make_caption(text: str) -> QLabel:
+            lbl = QLabel(text)
+            lbl.setProperty("role", "caption")
+            lbl.setWordWrap(True)
+            return lbl
+
+        dest_box = QVBoxLayout()
+        dest_box.setSpacing(3)
         dest_row = QHBoxLayout()
         self.radio_new_file = QRadioButton("Save to new file (<name>_updated.xlsx)")
         self.radio_new_file.setChecked(True)
@@ -597,14 +856,22 @@ class MainWindow(QMainWindow):
         dest_row.addSpacing(24)
         dest_row.addWidget(self.radio_overwrite)
         dest_row.addStretch(1)
+        dest_box.addLayout(dest_row)
+        dest_box.addWidget(
+            make_caption(
+                "Choose whether to save results to a separate file copy or overwrite original in place."
+            )
+        )
         options_layout.addWidget(
             make_row_label("Output file:"),
             0,
             0,
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            Qt.AlignmentFlag.AlignTop,
         )
-        options_layout.addLayout(dest_row, 0, 1)
+        options_layout.addLayout(dest_box, 0, 1)
 
+        filter_box = QVBoxLayout()
+        filter_box.setSpacing(3)
         filter_row = QHBoxLayout()
         self.supplier_combo = QComboBox()
         self.supplier_combo.setEditable(True)
@@ -631,14 +898,22 @@ class MainWindow(QMainWindow):
         )
         filter_row.addWidget(self.cb_blank_supplier)
         filter_row.addStretch(1)
+        filter_box.addLayout(filter_row)
+        filter_box.addWidget(
+            make_caption(
+                "Filter rows by vendor column. Select '(All Suppliers)' to process every row."
+            )
+        )
         options_layout.addWidget(
             make_row_label("Supplier filter:"),
             1,
             0,
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            Qt.AlignmentFlag.AlignTop,
         )
-        options_layout.addLayout(filter_row, 1, 1)
+        options_layout.addLayout(filter_box, 1, 1)
 
+        limit_box = QVBoxLayout()
+        limit_box.setSpacing(3)
         limit_row = QHBoxLayout()
         self.limit_spin = QSpinBox()
         self.limit_spin.setRange(0, 100000)
@@ -651,79 +926,28 @@ class MainWindow(QMainWindow):
         limit_row.addWidget(self.limit_spin)
         limit_row.addSpacing(10)
         lbl_limit_help = QLabel("(0 = update all matching rows)")
-        lbl_limit_help.setStyleSheet("color: #64748b; font-size: 11px;")
+        lbl_limit_help.setProperty("role", "caption")
         limit_row.addWidget(lbl_limit_help)
         limit_row.addStretch(1)
+        limit_box.addLayout(limit_row)
+        limit_box.addWidget(
+            make_caption(
+                "Process only the first N matching rows. Set to 0 to update the entire spreadsheet."
+            )
+        )
         options_layout.addWidget(
             make_row_label("Row limit:"),
             2,
             0,
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            Qt.AlignmentFlag.AlignTop,
         )
-        options_layout.addLayout(limit_row, 2, 1)
+        options_layout.addLayout(limit_box, 2, 1)
 
-        concurrency_row = QHBoxLayout()
-        self.workers_spin = QSpinBox()
-        self.workers_spin.setRange(1, 16)
-        self.workers_spin.setValue(3)
-        self.workers_spin.setFixedWidth(65)
-        self.workers_spin.setToolTip(
-            "Number of concurrent lookup worker threads (corresponds to --workers in CLI)."
-        )
-        concurrency_row.addWidget(self.workers_spin)
-        concurrency_row.addSpacing(6)
-        lbl_workers = QLabel("threads")
-        lbl_workers.setStyleSheet("color: #64748b; font-size: 11px;")
-        concurrency_row.addWidget(lbl_workers)
-
-        concurrency_row.addSpacing(24)
-        lbl_throttle_title = QLabel("Throttle:")
-        lbl_throttle_title.setStyleSheet("font-weight: 500; color: #475569;")
-        concurrency_row.addWidget(lbl_throttle_title)
-        concurrency_row.addSpacing(6)
-        self.throttle_spin = QDoubleSpinBox()
-        self.throttle_spin.setRange(0.0, 5.0)
-        self.throttle_spin.setSingleStep(0.05)
-        self.throttle_spin.setDecimals(2)
-        self.throttle_spin.setValue(0.20)
-        self.throttle_spin.setSuffix(" s")
-        self.throttle_spin.setFixedWidth(75)
-        self.throttle_spin.setToolTip(
-            "Minimum delay between HTTP requests across all threads (corresponds to --throttle in CLI)."
-        )
-        concurrency_row.addWidget(self.throttle_spin)
-
-        concurrency_row.addSpacing(24)
-        lbl_batch_title = QLabel("Cache batch:")
-        lbl_batch_title.setStyleSheet("font-weight: 500; color: #475569;")
-        concurrency_row.addWidget(lbl_batch_title)
-        concurrency_row.addSpacing(6)
-        self.batch_spin = QSpinBox()
-        self.batch_spin.setRange(50, 2000)
-        self.batch_spin.setSingleStep(50)
-        self.batch_spin.setValue(500)
-        self.batch_spin.setFixedWidth(75)
-        self.batch_spin.setToolTip(
-            "Number of items per SQLite cache query chunk (corresponds to --cache-chunk-size in CLI)."
-        )
-        concurrency_row.addWidget(self.batch_spin)
-        concurrency_row.addSpacing(6)
-        lbl_batch = QLabel("items")
-        lbl_batch.setStyleSheet("color: #64748b; font-size: 11px;")
-        concurrency_row.addWidget(lbl_batch)
-
-        concurrency_row.addStretch(1)
-        options_layout.addWidget(
-            make_row_label("Concurrency:"),
-            3,
-            0,
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-        )
-        options_layout.addLayout(concurrency_row, 3, 1)
-
+        rules_box = QVBoxLayout()
+        rules_box.setSpacing(3)
         rules_row = QHBoxLayout()
         self.cb_missing_only = QCheckBox("Only update missing prices (blank or zero)")
-        self.cb_missing_only.setChecked(True)
+        self.cb_missing_only.setChecked(False)
         self.cb_missing_only.setToolTip(
             "Only look up parts where cost or price is currently empty or $0.00.\n"
             "Existing pricing will be preserved (corresponds to --only-missing in CLI)."
@@ -738,13 +962,19 @@ class MainWindow(QMainWindow):
         )
         rules_row.addWidget(self.cb_dry_run)
         rules_row.addStretch(1)
+        rules_box.addLayout(rules_row)
+        rules_box.addWidget(
+            make_caption(
+                "When unchecked, all matching parts are updated. Check to only fill in missing prices."
+            )
+        )
         options_layout.addWidget(
             make_row_label("Options:"),
-            4,
+            3,
             0,
-            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            Qt.AlignmentFlag.AlignTop,
         )
-        options_layout.addLayout(rules_row, 4, 1)
+        options_layout.addLayout(rules_box, 3, 1)
         return options_group
 
     def _build_action_bar(self) -> QHBoxLayout:
@@ -752,32 +982,28 @@ class MainWindow(QMainWindow):
         self.start_btn = QPushButton("Start Price Update")
         self.start_btn.setObjectName("primaryBtn")
         self.start_btn.setEnabled(False)
+        self.start_btn.setToolTip(
+            "Start querying Marcone and updating spreadsheet prices."
+        )
         self.start_btn.clicked.connect(self._on_start)
         act_row.addWidget(self.start_btn)
 
         self.cancel_btn = QPushButton("Cancel")
         self.cancel_btn.setObjectName("cancelBtn")
         self.cancel_btn.setEnabled(False)
+        self.cancel_btn.setToolTip("Gracefully stop in-progress inventory updates.")
         self.cancel_btn.clicked.connect(self._on_cancel)
         act_row.addWidget(self.cancel_btn)
         act_row.addStretch(1)
 
         self.lbl_updated = QLabel("Updated: 0")
-        self.lbl_updated.setStyleSheet(
-            "padding: 4px 8px; border-radius: 4px; background-color: #dcfce7; color: #166534; font-weight: 600; font-size: 11px;"
-        )
+        self.lbl_updated.setObjectName("badgeUpdated")
         self.lbl_notfound = QLabel("Not Found: 0")
-        self.lbl_notfound.setStyleSheet(
-            "padding: 4px 8px; border-radius: 4px; background-color: #fef3c7; color: #92400e; font-weight: 600; font-size: 11px;"
-        )
+        self.lbl_notfound.setObjectName("badgeNotFound")
         self.lbl_skipped = QLabel("Skipped: 0")
-        self.lbl_skipped.setStyleSheet(
-            "padding: 4px 8px; border-radius: 4px; background-color: #f1f5f9; color: #475569; font-weight: 600; font-size: 11px;"
-        )
+        self.lbl_skipped.setObjectName("badgeSkipped")
         self.lbl_errors = QLabel("Errors: 0")
-        self.lbl_errors.setStyleSheet(
-            "padding: 4px 8px; border-radius: 4px; background-color: #fee2e2; color: #991b1b; font-weight: 600; font-size: 11px;"
-        )
+        self.lbl_errors.setObjectName("badgeErrors")
 
         act_row.addWidget(self.lbl_updated)
         act_row.addWidget(self.lbl_notfound)
@@ -787,20 +1013,23 @@ class MainWindow(QMainWindow):
 
     def _build_success_frame(self) -> QFrame:
         self.success_frame = QFrame()
+        self.success_frame.setObjectName("successFrame")
         self.success_frame.setVisible(False)
-        self.success_frame.setStyleSheet(
-            "background-color: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 10px;"
-        )
         succ_layout = QHBoxLayout(self.success_frame)
         self.succ_lbl = QLabel("Update completed successfully!")
-        self.succ_lbl.setStyleSheet("font-weight: 600; color: #166534;")
         succ_layout.addWidget(self.succ_lbl, 1)
 
         self.open_excel_btn = QPushButton("Open in Excel")
+        self.open_excel_btn.setToolTip(
+            "Open the updated spreadsheet in your default spreadsheet app."
+        )
         self.open_excel_btn.clicked.connect(self._open_in_excel)
         succ_layout.addWidget(self.open_excel_btn)
 
         self.show_folder_btn = QPushButton("Show in Folder")
+        self.show_folder_btn.setToolTip(
+            "Reveal the updated Excel file in Finder or File Explorer."
+        )
         self.show_folder_btn.clicked.connect(self._show_in_folder)
         succ_layout.addWidget(self.show_folder_btn)
         return self.success_frame
@@ -824,8 +1053,8 @@ class MainWindow(QMainWindow):
         central = QWidget()
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
-        main_layout.setSpacing(14)
-        main_layout.setContentsMargins(24, 20, 24, 20)
+        main_layout.setSpacing(10)
+        main_layout.setContentsMargins(20, 16, 20, 16)
 
         main_layout.addLayout(self._build_header())
 
@@ -842,7 +1071,7 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self.progress_bar)
 
         self.status_lbl = QLabel("Ready. Select a spreadsheet to begin.")
-        self.status_lbl.setStyleSheet("font-size: 12px; color: #64748b;")
+        self.status_lbl.setProperty("role", "caption")
         main_layout.addWidget(self.status_lbl)
 
         main_layout.addWidget(self._build_success_frame())
@@ -852,14 +1081,12 @@ class MainWindow(QMainWindow):
         creds = load_credentials()
         if creds.get("username"):
             self.conn_chip.setText(f"● Marcone: {creds['username']}")
-            self.conn_chip.setStyleSheet(
-                "padding: 5px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; background-color: #dcfce7; color: #166534;"
-            )
+            self.conn_chip.setObjectName("connChipConfigured")
         else:
             self.conn_chip.setText("○ Marcone: Not configured")
-            self.conn_chip.setStyleSheet(
-                "padding: 5px 10px; border-radius: 12px; font-size: 11px; font-weight: 600; background-color: #f1f5f9; color: #64748b;"
-            )
+            self.conn_chip.setObjectName("connChipUnconfigured")
+        self.conn_chip.style().unpolish(self.conn_chip)
+        self.conn_chip.style().polish(self.conn_chip)
 
     def _open_credentials(self) -> None:
         dlg = CredentialsDialog(self)
@@ -942,15 +1169,6 @@ class MainWindow(QMainWindow):
             price_str = "-"
         return f"{price_str}  ({res.message})" if res.message else price_str
 
-    @staticmethod
-    def _status_color(status: str) -> QColor:
-        color_map = {
-            "updated": "#16a34a",
-            "not_found": "#d97706",
-            "error": "#dc2626",
-        }
-        return QColor(color_map.get(status, "#64748b"))
-
     def _on_start(self) -> None:
         if not self.selected_file_path:
             return
@@ -965,6 +1183,7 @@ class MainWindow(QMainWindow):
 
         supplier_filter = self._determine_supplier_filter()
         limit_val = self.limit_spin.value() or None
+        lookahead_val = self.lookahead_spin.value() or None
 
         self.worker = UpdateWorker(
             input_file=self.selected_file_path,
@@ -981,6 +1200,7 @@ class MainWindow(QMainWindow):
             workers=self.workers_spin.value(),
             throttle_seconds=self.throttle_spin.value(),
             cache_chunk_size=self.batch_spin.value(),
+            lookahead=lookahead_val,
             parent=self,
         )
 
@@ -1085,7 +1305,12 @@ def main(argv: list[str] | None = None) -> int:
     app_icon = MainWindow._load_app_icon()
     if not app_icon.isNull():
         app.setWindowIcon(app_icon)
-    app.setStyleSheet(MAIN_STYLESHEET)
+    is_dark = False
+    if hasattr(app, "styleHints") and hasattr(Qt, "ColorScheme"):
+        hints = app.styleHints()
+        if hasattr(hints, "colorScheme"):
+            is_dark = hints.colorScheme() == Qt.ColorScheme.Dark
+    app.setStyleSheet(get_stylesheet(dark=is_dark))
     window = MainWindow()
     window.show()
     return app.exec()

@@ -8,13 +8,15 @@ import pytest
 os.environ["QT_QPA_PLATFORM"] = "offscreen"
 
 from inventory_updater.gui import (
+    AdvancedSettingsDialog,
     CredentialsDialog,
     FileDropArea,
     MainWindow,
     UpdateWorker,
 )
+from inventory_updater.styles import get_status_colors, get_stylesheet
 from inventory_updater.updater import RowUpdateResult, UpdateStats
-from PySide6.QtWidgets import QApplication, QDialog
+from PySide6.QtWidgets import QApplication, QDialog, QGroupBox, QLabel, QLayout
 
 
 @pytest.fixture(scope="session")
@@ -68,12 +70,13 @@ def test_main_window_init(qapp):
         assert window.supplier_combo.isEditable()
         assert window.supplier_combo.currentText() == "Marcone"
         assert window.cb_blank_supplier.isChecked() is True
-        assert window.cb_missing_only.isChecked() is True
+        assert window.cb_missing_only.isChecked() is False
         assert window.cb_dry_run.isChecked() is False
         assert window.limit_spin.value() == 0
         assert window.workers_spin.value() == 3
         assert window.throttle_spin.value() == 0.20
         assert window.batch_spin.value() == 500
+        assert window.lookahead_spin.value() == 0
 
 
 def test_main_window_file_selection_and_options(qapp, test_excel_file):
@@ -264,3 +267,119 @@ def test_main_window_open_credentials_updates_chip_and_start_btn(qapp, test_exce
 
         assert "Marcone: newuser" in window.conn_chip.text()
         assert window.start_btn.isEnabled() is True
+
+
+def test_advanced_settings_dialog_defaults_and_reset(qapp):
+    dlg = AdvancedSettingsDialog()
+    assert dlg.workers_spin.value() == 3
+    assert pytest.approx(dlg.throttle_spin.value()) == 0.20
+    assert dlg.batch_spin.value() == 500
+    assert dlg.lookahead_spin.value() == 0
+
+    dlg.workers_spin.setValue(8)
+    dlg.throttle_spin.setValue(0.50)
+    dlg.batch_spin.setValue(1000)
+    dlg.lookahead_spin.setValue(50)
+
+    dlg._reset_defaults()
+    assert dlg.workers_spin.value() == 3
+    assert pytest.approx(dlg.throttle_spin.value()) == 0.20
+    assert dlg.batch_spin.value() == 500
+    assert dlg.lookahead_spin.value() == 0
+
+
+def test_advanced_settings_dialog_custom_init(qapp):
+    dlg = AdvancedSettingsDialog(
+        workers=6,
+        throttle_seconds=0.35,
+        cache_chunk_size=750,
+        lookahead=20,
+    )
+    assert dlg.workers_spin.value() == 6
+    assert pytest.approx(dlg.throttle_spin.value()) == 0.35
+    assert dlg.batch_spin.value() == 750
+    assert dlg.lookahead_spin.value() == 20
+
+
+def test_main_window_open_advanced_settings(qapp):
+    window = MainWindow()
+    assert window.adv_btn.text() == "Advanced..."
+    with patch.object(window.adv_dialog, "exec") as mock_exec:
+        window.adv_btn.click()
+        mock_exec.assert_called_once()
+
+
+def test_main_window_layout_constraints_and_no_performance_row(qapp):
+    window = MainWindow()
+    window.show()
+
+    min_size = window.minimumSize()
+    assert min_size.width() >= 800
+    assert min_size.height() >= 640
+
+    options_group = None
+    for child in window.centralWidget().findChildren(QGroupBox):
+        if child.title() == "Update Options":
+            options_group = child
+            break
+    assert options_group is not None
+
+    labels = [lbl.text() for lbl in options_group.findChildren(QLabel)]
+    assert not any("Performance" in text for text in labels)
+    assert not any("request throttling" in text for text in labels)
+
+    assert (
+        options_group.layout().sizeConstraint() == QLayout.SizeConstraint.SetMinimumSize
+    )
+
+    window.resize(800, 640)
+    assert options_group.height() >= 200
+
+
+def test_dark_mode_stylesheets_and_palette():
+    light_css = get_stylesheet(dark=False)
+    dark_css = get_stylesheet(dark=True)
+
+    assert "#f8fafc" in light_css
+    assert "#0f172a" in dark_css
+
+    light_colors = get_status_colors(dark=False)
+    dark_colors = get_status_colors(dark=True)
+
+    assert light_colors["updated"] == "#16a34a"
+    assert dark_colors["updated"] == "#4ade80"
+    assert light_colors["not_found"] == "#d97706"
+    assert dark_colors["not_found"] == "#fbbf24"
+    assert light_colors["error"] == "#dc2626"
+    assert dark_colors["error"] == "#f87171"
+
+
+def test_main_window_theme_switching(qapp):
+    window = MainWindow()
+    result = RowUpdateResult(
+        row_idx=2,
+        part_no="WPW10321304",
+        status="updated",
+        old_cost=10.0,
+        new_cost=15.5,
+        old_price=20.0,
+        new_price=29.99,
+    )
+    window._on_row_result(result)
+    item = window.table.item(0, 2)
+    assert item is not None
+
+    with patch.object(MainWindow, "_is_dark_mode", return_value=False):
+        window._apply_theme()
+        assert item.foreground().color().name().lower() == "#16a34a"
+
+    with patch.object(MainWindow, "_is_dark_mode", return_value=True):
+        window._apply_theme()
+        assert item.foreground().color().name().lower() == "#4ade80"
+
+
+def test_credentials_dialog_fields_and_subaccount(qapp):
+    dlg = CredentialsDialog()
+    assert dlg.user_input.placeholderText() == "e.g. 123456 or user@example.com"
+    assert dlg.pass_input.placeholderText() == "Your Marcone password"
+    assert dlg.acc_input.placeholderText() == "Leave blank if not required"
