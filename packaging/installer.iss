@@ -1,6 +1,6 @@
 ; Inno Setup Script for Tech 2000 Inventory Price Updater
 #define MyAppName "Tech 2000 Inventory Price Updater"
-#define MyAppVersion "0.1.0"
+#define MyAppVersion "1.0.0"
 #define MyAppPublisher "Tech 2000"
 #define MyAppExeName "Tech2000-InventoryUpdater.exe"
 
