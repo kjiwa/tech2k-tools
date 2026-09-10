@@ -34,3 +34,6 @@ htmlcov/
 .cache/
 *.sqlite
 *.xlsx
+*.dmg
+*.iconset/
+

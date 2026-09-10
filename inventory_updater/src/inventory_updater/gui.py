@@ -10,7 +10,14 @@ from typing import Any
 from marcone.client import MarconeClient
 from marcone.exceptions import AuthenticationError, MarconeError
 from PySide6.QtCore import QObject, Qt, QThread, QUrl, Signal
-from PySide6.QtGui import QColor, QDesktopServices, QDragEnterEvent, QDropEvent, QFont
+from PySide6.QtGui import (
+    QColor,
+    QDesktopServices,
+    QDragEnterEvent,
+    QDropEvent,
+    QFont,
+    QIcon,
+)
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -36,7 +43,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from inventory_updater.cache import PriceCache
+from inventory_updater.cache import PriceCache, get_default_cache_path
 from inventory_updater.credentials import (
     check_connection,
     load_credentials,
@@ -73,7 +80,7 @@ class UpdateWorker(QThread):
         username: str,
         password: str,
         account_number: str = "",
-        cache_file: str = ".cache/marcone_prices.sqlite",
+        cache_file: str | None = None,
         cache_ttl_days: float = 7.0,
         workers: int = 3,
         parent: QObject | None = None,
@@ -90,7 +97,7 @@ class UpdateWorker(QThread):
         self.username = username
         self.password = password
         self.account_number = account_number
-        self.cache_file = cache_file
+        self.cache_file = cache_file or get_default_cache_path()
         self.cache_ttl_days = cache_ttl_days
         self.workers = workers
         self._is_cancelled = False
@@ -489,12 +496,40 @@ class MainWindow(QMainWindow):
         self.resize(980, 750)
         self.setMinimumSize(820, 600)
 
+        app_icon = self._load_app_icon()
+        if not app_icon.isNull():
+            self.setWindowIcon(app_icon)
+
         self.selected_file_path: Path | None = None
         self.output_file_path: Path | None = None
         self.worker: UpdateWorker | None = None
 
         self._init_ui()
         self._update_connection_chip()
+
+    @staticmethod
+    def _load_app_icon() -> QIcon:
+        """Find and load application icon across package and bundle paths."""
+        candidates = [
+            Path(__file__).parent / "assets" / "icon.png",
+            Path(__file__).parent / "assets" / "icon.ico",
+        ]
+        if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
+            meipass = Path(sys._MEIPASS)
+            candidates.extend(
+                [
+                    meipass / "packaging" / "icon.png",
+                    meipass / "packaging" / "icon.ico",
+                    meipass / "icon.ico",
+                    meipass / "icon.png",
+                ]
+            )
+        for candidate in candidates:
+            if candidate.exists():
+                icon = QIcon(str(candidate))
+                if not icon.isNull():
+                    return icon
+        return QIcon()
 
     def _init_ui(self) -> None:
         central = QWidget()
@@ -949,6 +984,9 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication(argv or sys.argv)
     app.setApplicationName("Tech 2000 Inventory Price Updater")
     app.setApplicationDisplayName("Tech 2000 Inventory Price Updater")
+    app_icon = MainWindow._load_app_icon()
+    if not app_icon.isNull():
+        app.setWindowIcon(app_icon)
     app.setStyleSheet(MAIN_STYLESHEET)
     window = MainWindow()
     window.show()

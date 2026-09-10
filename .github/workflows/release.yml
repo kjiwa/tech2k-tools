@@ -1,0 +1,149 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos:
+    name: Build macOS (Apple Silicon)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-packages
+
+      - name: Generate icon assets
+        run: uv run python packaging/generate_icons.py
+
+      - name: Package with PyInstaller
+        run: uv run pyinstaller --clean --noconfirm packaging/inventory_updater.spec
+
+      - name: Sign macOS app bundle (ad-hoc)
+        run: codesign --force --deep -s - dist/Tech2000-InventoryUpdater.app
+
+      - name: Package DMG installer
+        run: |
+          mkdir -p dmg_root
+          cp -R dist/Tech2000-InventoryUpdater.app dmg_root/
+          ln -s /Applications dmg_root/Applications
+          hdiutil create -volname "Tech 2000 Inventory Price Updater" -srcfolder dmg_root -ov -format UDZO dist/Tech2000-InventoryUpdater-macOS-arm64.dmg
+          rm -rf dmg_root
+
+      - name: Package portable ZIP
+        run: |
+          cd dist
+          zip -r -y Tech2000-InventoryUpdater-macOS-arm64.zip Tech2000-InventoryUpdater.app
+          cd ..
+
+      - name: Upload macOS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-artifacts
+          path: |
+            dist/Tech2000-InventoryUpdater-macOS-arm64.dmg
+            dist/Tech2000-InventoryUpdater-macOS-arm64.zip
+          retention-days: 1
+
+  build-windows:
+    name: Build Windows (x64)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          version: "latest"
+          enable-cache: true
+
+      - name: Set up Python 3.12
+        run: uv python install 3.12
+
+      - name: Install dependencies
+        run: uv sync --all-packages
+
+      - name: Generate icon assets
+        run: uv run python packaging/generate_icons.py
+
+      - name: Package with PyInstaller
+        run: uv run pyinstaller --clean --noconfirm packaging/inventory_updater.spec
+
+      - name: Build Inno Setup installer
+        shell: pwsh
+        run: |
+          if (Get-Command iscc -ErrorAction SilentlyContinue) {
+            iscc packaging/installer.iss
+          } elseif (Test-Path "C:\Program Files (x86)\Inno Setup 6\ISCC.exe") {
+            & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging/installer.iss
+          } else {
+            choco install innosetup -y --no-progress
+            & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" packaging/installer.iss
+          }
+
+      - name: Package portable ZIP
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist\Tech2000-InventoryUpdater\* -DestinationPath dist\Tech2000-InventoryUpdater-Windows-x64-Portable.zip -Force
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-artifacts
+          path: |
+            dist/Tech2000-InventoryUpdater-Windows-x64-Setup.exe
+            dist/Tech2000-InventoryUpdater-Windows-x64-Portable.zip
+          retention-days: 1
+
+  publish-release:
+    name: Publish Release
+    needs: [build-macos, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create release directory
+        run: mkdir -p release-assets
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: macos-artifacts
+          path: release-assets
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-artifacts
+          path: release-assets
+
+      - name: Generate checksums
+        run: |
+          cd release-assets
+          sha256sum * > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+          cd ..
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release-assets/*
+          generate_release_notes: true
+          draft: false
+          prerelease: false

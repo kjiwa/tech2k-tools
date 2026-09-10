@@ -87,3 +87,21 @@ def test_cache_concurrent_writes(tmp_path):
     assert len(cached_map) == 25
     assert len(missing_set) == 25
 
+
+def test_user_cache_dir(monkeypatch, tmp_path):
+    from inventory_updater.cache import get_default_cache_path, get_user_cache_dir
+
+    monkeypatch.setattr("platform.system", lambda: "Windows")
+    monkeypatch.setenv("LOCALAPPDATA", "C:\\Users\\Test\\AppData\\Local")
+    win_dir = get_user_cache_dir()
+    assert "tech2k-tools" in str(win_dir)
+
+    monkeypatch.setattr("platform.system", lambda: "Darwin")
+    mac_dir = get_user_cache_dir()
+    assert "Caches" in str(mac_dir)
+
+    monkeypatch.setattr("inventory_updater.cache.Path.cwd", lambda: tmp_path)
+    cache_path = get_default_cache_path()
+    assert cache_path == str(mac_dir / "marcone_prices.sqlite")
+
+

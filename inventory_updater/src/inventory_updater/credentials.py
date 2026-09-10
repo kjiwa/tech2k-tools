@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import platform
 from pathlib import Path
 
 from dotenv import dotenv_values, set_key
@@ -8,8 +9,20 @@ from marcone.client import MarconeClient
 from marcone.exceptions import AuthenticationError, MarconeError
 
 
+def get_user_config_dir() -> Path:
+    """Return platform user config directory."""
+    system = platform.system()
+    if system == "Windows":
+        base = os.getenv("APPDATA") or (Path.home() / "AppData" / "Roaming")
+        return Path(base) / "tech2k-tools"
+    if system == "Darwin":
+        return Path.home() / "Library" / "Application Support" / "tech2k-tools"
+    base = os.getenv("XDG_CONFIG_HOME") or (Path.home() / ".config")
+    return Path(base) / "tech2k-tools"
+
+
 def get_default_env_path() -> Path:
-    """Return default .env path in workspace or current directory."""
+    """Return default .env path in workspace or standard config directory."""
     cwd_env = Path.cwd() / ".env"
     if cwd_env.exists():
         return cwd_env
@@ -18,7 +31,12 @@ def get_default_env_path() -> Path:
         candidate = parent / ".env"
         if candidate.exists():
             return candidate
-    return cwd_env
+    user_env = get_user_config_dir() / ".env"
+    if user_env.exists():
+        return user_env
+    if (Path.cwd() / "pyproject.toml").exists():
+        return cwd_env
+    return user_env
 
 
 def load_credentials(env_path: Path | None = None) -> dict[str, str]:
@@ -27,6 +45,10 @@ def load_credentials(env_path: Path | None = None) -> dict[str, str]:
     file_vars: dict[str, str | None] = {}
     if path.exists():
         file_vars = dotenv_values(path)
+    elif env_path is None:
+        user_env = get_user_config_dir() / ".env"
+        if user_env.exists():
+            file_vars = dotenv_values(user_env)
 
     username = os.getenv("MARCONE_USERNAME") or str(
         file_vars.get("MARCONE_USERNAME") or ""

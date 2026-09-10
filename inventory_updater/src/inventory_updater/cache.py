@@ -2,19 +2,41 @@ from __future__ import annotations
 
 import json
 import os
+import platform
 import sqlite3
 import threading
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from marcone.models import PartPricing
 
 
+def get_user_cache_dir() -> Path:
+    """Return platform user cache directory."""
+    system = platform.system()
+    if system == "Windows":
+        base = os.getenv("LOCALAPPDATA") or (Path.home() / "AppData" / "Local")
+        return Path(base) / "tech2k-tools"
+    if system == "Darwin":
+        return Path.home() / "Library" / "Caches" / "tech2k-tools"
+    base = os.getenv("XDG_CACHE_HOME") or (Path.home() / ".cache")
+    return Path(base) / "tech2k-tools"
+
+
+def get_default_cache_path() -> str:
+    """Return default SQLite cache path, preferring local workspace if present."""
+    local_cache = Path.cwd() / ".cache"
+    if local_cache.exists() or (Path.cwd() / "pyproject.toml").exists():
+        return str(local_cache / "marcone_prices.sqlite")
+    return str(get_user_cache_dir() / "marcone_prices.sqlite")
+
+
 class PriceCache:
     """SQLite-backed cache for Marcone part lookups."""
 
-    def __init__(self, db_path: str = ".cache/marcone_prices.sqlite") -> None:
-        self.db_path = db_path
+    def __init__(self, db_path: str | None = None) -> None:
+        self.db_path = db_path or get_default_cache_path()
         self._write_lock = threading.Lock()
         self._init_db()
 
