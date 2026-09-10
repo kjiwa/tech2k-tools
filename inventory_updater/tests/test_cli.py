@@ -10,6 +10,13 @@ def test_parse_args_defaults():
     assert args.field == "both"
     assert args.dry_run is False
     assert args.cache_ttl_days == 7.0
+    assert args.supplier_filter == "Marcone"
+    assert args.allow_blank_supplier is True
+
+
+def test_parse_args_no_allow_blank_supplier():
+    args = parse_args(["--no-allow-blank-supplier"])
+    assert args.allow_blank_supplier is False
 
 
 def test_parse_args_custom():
@@ -48,4 +55,23 @@ def test_main_missing_credentials(tmp_path):
         patch.dict("os.environ", {}, clear=True),
     ):
         code = main(["--file", str(fake_file)])
+        assert code == 1
+
+
+def test_main_typo_fallback(tmp_path, capsys):
+    real_file = tmp_path / "Service Fusion Inventory.xlsx"
+    real_file.touch()
+
+    # Pass the .xslx typo
+    typo_file = tmp_path / "Service Fusion Inventory.xslx"
+
+    with (
+        patch("inventory_updater.cli.load_dotenv"),
+        patch.dict("os.environ", {}, clear=True),
+    ):
+        code = main(["--file", str(typo_file)])
+        # Falls back to .xlsx, fails at missing credentials rather than missing file
+        captured = capsys.readouterr()
+        assert "not found" not in captured.err
+        assert "Marcone credentials required" in captured.err
         assert code == 1

@@ -43,7 +43,8 @@ class InventoryUpdater:
         field: str = "both",
         dry_run: bool = False,
         limit: int | None = None,
-        supplier_filter: str | None = None,
+        supplier_filter: str | None = "Marcone",
+        allow_blank_supplier: bool = True,
         set_supplier: str | None = None,
         only_missing: bool = False,
         progress_cb: Callable[[int, int, str], None] | None = None,
@@ -84,12 +85,12 @@ class InventoryUpdater:
                 str(supplier_cell.value or "").strip() if supplier_cell else ""
             )
 
-            if (
-                supplier_filter
-                and supplier_filter.lower() not in current_supplier.lower()
-            ):
-                stats.skipped += 1
-                continue
+            if supplier_filter:
+                is_blank = not current_supplier
+                is_match = supplier_filter.lower() in current_supplier.lower()
+                if not (is_match or (allow_blank_supplier and is_blank)):
+                    stats.skipped += 1
+                    continue
 
             cost_cell = (
                 sheet.cell(row=row_idx, column=col_map["cost"])
@@ -138,6 +139,7 @@ class InventoryUpdater:
             try:
                 pricing = self._resolve_pricing(part_no)
                 if not pricing or not pricing.has_pricing:
+                    logger.warning("Part %s not found in Marcone catalog", part_no)
                     stats.not_found += 1
                     continue
 
@@ -168,9 +170,13 @@ class InventoryUpdater:
                     stats.skipped += 1
 
             except PartNotFoundError:
+                logger.warning("Part %s not found in Marcone catalog", part_no)
                 stats.not_found += 1
             except MarconeError as exc:
                 logger.error("Error looking up part %s: %s", part_no, exc)
+                stats.errors += 1
+            except Exception as exc:
+                logger.error("Unexpected error looking up part %s: %s", part_no, exc)
                 stats.errors += 1
 
         if not dry_run and stats.updated > 0:

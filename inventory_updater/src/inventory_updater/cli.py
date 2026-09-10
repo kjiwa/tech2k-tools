@@ -52,7 +52,15 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--supplier-filter",
-        help="Only update items where current Primary Vendor / Supplier Name contains this string (e.g. 'Marcone')",
+        default="Marcone",
+        help="Only update items where current Primary Vendor / Supplier Name matches this string (default: Marcone)",
+    )
+    parser.add_argument(
+        "--no-allow-blank-supplier",
+        action="store_false",
+        dest="allow_blank_supplier",
+        default=True,
+        help="Do not update items where supplier is blank (by default, blank suppliers are updated)",
     )
     parser.add_argument(
         "--set-supplier",
@@ -111,6 +119,11 @@ def main(argv: list[str] | None = None) -> int:
     setup_logging(args.verbose)
 
     input_path = Path(args.file)
+    if not input_path.exists():
+        if input_path.suffix.lower() == ".xslx" and input_path.with_suffix(".xlsx").exists():
+            input_path = input_path.with_suffix(".xlsx")
+        elif input_path.suffix.lower() == ".xlsx" and input_path.with_suffix(".xslx").exists():
+            input_path = input_path.with_suffix(".xslx")
     if not input_path.exists():
         sys.stderr.write(f"Error: Inventory file '{input_path}' not found.\n")
         return 1
@@ -171,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
             dry_run=args.dry_run,
             limit=args.limit,
             supplier_filter=args.supplier_filter,
+            allow_blank_supplier=args.allow_blank_supplier,
             set_supplier=args.set_supplier,
             only_missing=args.only_missing,
             progress_cb=progress_callback,

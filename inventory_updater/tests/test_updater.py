@@ -67,7 +67,7 @@ def sample_excel(tmp_path):
             "Flat",
             "Yes",
             "FRG",
-            "Other",
+            "",
             "Active",
         ]
     )
@@ -156,7 +156,7 @@ def test_updater_cost_only(tmp_path, sample_excel):
     assert sheet.cell(row=2, column=10).value == 18.0  # unchanged list price
 
 
-def test_updater_supplier_filter(tmp_path, sample_excel):
+def test_updater_supplier_filter_strict(tmp_path, sample_excel):
     mock_client = MagicMock(spec=MarconeClient)
     mock_client.lookup_part.return_value = PartPricing(
         part_number="WPW10321304", customer_cost=15.25, list_price=27.50
@@ -170,10 +170,76 @@ def test_updater_supplier_filter(tmp_path, sample_excel):
         input_file=sample_excel,
         output_file=output_path,
         supplier_filter="Marcone",
+        allow_blank_supplier=False,
     )
 
     assert stats.updated == 1
     assert stats.skipped == 2
+
+
+def test_updater_supplier_filter_allows_blank_and_skips_others(tmp_path):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Worksheet"
+    ws.append(["Part Number", "Unit Price", "Avg. Unit Cost", "Primary Vendor"])
+    ws.append(["WPW10321304", 18.0, 10.0, "Marcone"])
+    ws.append(["240323002", 0.0, 0.0, ""])
+    ws.append(["VENMAR001", 10.0, 5.0, "Venmar"])
+    ws.append(["AMRE002", 20.0, 12.0, "Amre Supply"])
+
+    excel_path = tmp_path / "vendor_test.xlsx"
+    wb.save(excel_path)
+
+    mock_client = MagicMock(spec=MarconeClient)
+
+    def fake_lookup(part_no):
+        if part_no == "WPW10321304":
+            return PartPricing(part_number=part_no, customer_cost=15.25, list_price=27.50)
+        elif part_no == "240323002":
+            return PartPricing(part_number=part_no, customer_cost=18.45, list_price=30.00)
+        raise PartNotFoundError(part_no)
+
+    mock_client.lookup_part.side_effect = fake_lookup
+
+    cache = PriceCache(db_path=str(tmp_path / "cache.sqlite"))
+    updater = InventoryUpdater(client=mock_client, cache=cache)
+
+    output_path = tmp_path / "vendor_test_out.xlsx"
+    stats = updater.update_file(
+        input_file=excel_path,
+        output_file=output_path,
+        supplier_filter="Marcone",
+        allow_blank_supplier=True,
+    )
+
+    # 4 rows: 2 updated (Marcone and blank), 2 skipped (Venmar and Amre Supply)
+    assert stats.total_rows == 4
+    assert stats.updated == 2
+    assert stats.skipped == 2
+    assert stats.not_found == 0
+
+
+def test_updater_missing_part_logged_and_counted(tmp_path, caplog):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(["Part Number", "Unit Price", "Avg. Unit Cost", "Primary Vendor"])
+    ws.append(["UNKNOWN_PART_XYZ", 0.0, 0.0, "Marcone"])
+
+    excel_path = tmp_path / "missing_test.xlsx"
+    wb.save(excel_path)
+
+    mock_client = MagicMock(spec=MarconeClient)
+    mock_client.lookup_part.side_effect = PartNotFoundError("UNKNOWN_PART_XYZ")
+
+    cache = PriceCache(db_path=str(tmp_path / "cache.sqlite"))
+    updater = InventoryUpdater(client=mock_client, cache=cache)
+
+    with caplog.at_level("WARNING"):
+        stats = updater.update_file(input_file=excel_path)
+
+    assert stats.not_found == 1
+    assert stats.updated == 0
+    assert "Part UNKNOWN_PART_XYZ not found in Marcone catalog" in caplog.text
 
 
 def test_updater_set_supplier(tmp_path, sample_excel):

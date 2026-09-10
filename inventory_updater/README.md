@@ -42,11 +42,12 @@ By default, the tool reads `InventoryItems.xlsx` in the working directory and ou
 
 | Option | Description | Default |
 | --- | --- | --- |
-| `-f, --file` | Path to the inventory Excel file | `InventoryItems.xlsx` |
+| `-f, --file` | Path to the inventory Excel file | `Service Fusion Inventory.xlsx` |
 | `-o, --output` | Path for the output Excel file | `<file>_updated.xlsx` |
 | `--in-place` | Overwrite the input file directly | `false` |
 | `--field` | Fields to update: `cost`, `price`, or `both` | `both` |
-| `--supplier-filter` | Only update rows where current Supplier Name contains this text | None |
+| `--supplier-filter` | Only update rows where current Supplier Name contains this text | `Marcone` |
+| `--no-allow-blank-supplier` | Do not update rows where supplier is blank | `false` (blanks allowed) |
 | `--set-supplier` | Set Supplier Name column to this value on updated rows | None |
 | `--only-missing` | Only look up rows where cost or price is blank or zero | `false` |
 | `--dry-run` | Look up prices and print stats without modifying any file | `false` |
