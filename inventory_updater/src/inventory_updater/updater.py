@@ -4,6 +4,7 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 import openpyxl
 from marcone.client import MarconeClient
@@ -21,6 +22,49 @@ class UpdateStats:
     updated: int = 0
     not_found: int = 0
     errors: int = 0
+    cancelled: bool = False
+
+
+@dataclass
+class RowUpdateResult:
+    row_idx: int
+    part_no: str
+    status: str  # "updated", "not_found", "skipped", "error"
+    old_cost: float | None = None
+    new_cost: float | None = None
+    old_price: float | None = None
+    new_price: float | None = None
+    message: str = ""
+
+
+def get_file_info(file_path: str | Path) -> dict[str, Any]:
+    """Inspect an Excel inventory file without modifying it."""
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"File not found: {path}")
+
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    sheet = wb.active
+    if sheet is None:
+        raise ValueError(f"Workbook {path} has no active sheet")
+
+    first_row = next(sheet.iter_rows(values_only=True), None)
+    headers = list(first_row) if first_row else []
+    col_map = InventoryUpdater._detect_columns(headers)
+
+    row_count = sheet.max_row - 1 if sheet.max_row and sheet.max_row > 1 else 0
+
+    wb.close()
+    return {
+        "file_name": path.name,
+        "sheet_name": sheet.title,
+        "row_count": max(0, row_count),
+        "headers": [str(h) for h in headers if h is not None],
+        "has_part_col": "part" in col_map,
+        "has_cost_col": "cost" in col_map or "avg_cost" in col_map,
+        "has_price_col": "price" in col_map,
+        "has_supplier_col": "supplier" in col_map,
+    }
 
 
 class InventoryUpdater:
@@ -48,6 +92,8 @@ class InventoryUpdater:
         set_supplier: str | None = None,
         only_missing: bool = False,
         progress_cb: Callable[[int, int, str], None] | None = None,
+        row_cb: Callable[[RowUpdateResult], None] | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ) -> UpdateStats:
         """Process an Excel inventory file and update prices."""
         input_path = Path(input_file)
@@ -67,6 +113,10 @@ class InventoryUpdater:
 
         processed_count = 0
         for row_idx in rows_to_process:
+            if cancel_check and cancel_check():
+                stats.cancelled = True
+                break
+
             if limit is not None and stats.updated >= limit:
                 break
 
@@ -74,6 +124,15 @@ class InventoryUpdater:
             part_no = str(part_cell.value or "").strip()
             if not part_no:
                 stats.skipped += 1
+                if row_cb:
+                    row_cb(
+                        RowUpdateResult(
+                            row_idx=row_idx,
+                            part_no="",
+                            status="skipped",
+                            message="Blank part number",
+                        )
+                    )
                 continue
 
             supplier_cell = (
@@ -90,6 +149,15 @@ class InventoryUpdater:
                 is_match = supplier_filter.lower() in current_supplier.lower()
                 if not (is_match or (allow_blank_supplier and is_blank)):
                     stats.skipped += 1
+                    if row_cb:
+                        row_cb(
+                            RowUpdateResult(
+                                row_idx=row_idx,
+                                part_no=part_no,
+                                status="skipped",
+                                message=f"Supplier mismatch: '{current_supplier}'",
+                            )
+                        )
                     continue
 
             cost_cell = (
@@ -108,6 +176,19 @@ class InventoryUpdater:
                 else None
             )
 
+            def _parse_float(val: Any) -> float | None:
+                try:
+                    return float(val) if val is not None else None
+                except (ValueError, TypeError):
+                    return None
+
+            orig_cost = _parse_float(
+                cost_cell.value
+                if cost_cell
+                else (avg_cost_cell.value if avg_cost_cell else None)
+            )
+            orig_price = _parse_float(price_cell.value if price_cell else None)
+
             if only_missing:
                 has_cost = any(
                     c is not None and c.value not in (None, "", 0, 0.0, "0", "0.00")
@@ -124,12 +205,45 @@ class InventoryUpdater:
 
                 if field == "cost" and has_cost:
                     stats.skipped += 1
+                    if row_cb:
+                        row_cb(
+                            RowUpdateResult(
+                                row_idx=row_idx,
+                                part_no=part_no,
+                                status="skipped",
+                                old_cost=orig_cost,
+                                old_price=orig_price,
+                                message="Cost already present",
+                            )
+                        )
                     continue
                 if field == "price" and has_price:
                     stats.skipped += 1
+                    if row_cb:
+                        row_cb(
+                            RowUpdateResult(
+                                row_idx=row_idx,
+                                part_no=part_no,
+                                status="skipped",
+                                old_cost=orig_cost,
+                                old_price=orig_price,
+                                message="Price already present",
+                            )
+                        )
                     continue
                 if field == "both" and has_cost and has_price:
                     stats.skipped += 1
+                    if row_cb:
+                        row_cb(
+                            RowUpdateResult(
+                                row_idx=row_idx,
+                                part_no=part_no,
+                                status="skipped",
+                                old_cost=orig_cost,
+                                old_price=orig_price,
+                                message="Cost and price already present",
+                            )
+                        )
                     continue
 
             processed_count += 1
@@ -141,16 +255,32 @@ class InventoryUpdater:
                 if not pricing or not pricing.has_pricing:
                     logger.warning("Part %s not found in Marcone catalog", part_no)
                     stats.not_found += 1
+                    if row_cb:
+                        row_cb(
+                            RowUpdateResult(
+                                row_idx=row_idx,
+                                part_no=part_no,
+                                status="not_found",
+                                old_cost=orig_cost,
+                                old_price=orig_price,
+                                message="Not found in Marcone catalog",
+                            )
+                        )
                     continue
 
                 modified = False
+                new_cost = orig_cost
+                new_price = orig_price
+
                 if field in ("cost", "both") and pricing.customer_cost is not None:
                     if cost_cell and cost_cell.value != pricing.customer_cost:
                         cost_cell.value = pricing.customer_cost
                         modified = True
+                        new_cost = pricing.customer_cost
                     if avg_cost_cell and avg_cost_cell.value != pricing.customer_cost:
                         avg_cost_cell.value = pricing.customer_cost
                         modified = True
+                        new_cost = pricing.customer_cost
 
                 if (
                     field in ("price", "both")
@@ -160,24 +290,83 @@ class InventoryUpdater:
                 ):
                     price_cell.value = pricing.list_price
                     modified = True
+                    new_price = pricing.list_price
 
                 if set_supplier and supplier_cell and modified:
                     supplier_cell.value = set_supplier
 
                 if modified:
                     stats.updated += 1
+                    if row_cb:
+                        row_cb(
+                            RowUpdateResult(
+                                row_idx=row_idx,
+                                part_no=part_no,
+                                status="updated",
+                                old_cost=orig_cost,
+                                new_cost=new_cost,
+                                old_price=orig_price,
+                                new_price=new_price,
+                            )
+                        )
                 else:
                     stats.skipped += 1
+                    if row_cb:
+                        row_cb(
+                            RowUpdateResult(
+                                row_idx=row_idx,
+                                part_no=part_no,
+                                status="skipped",
+                                old_cost=orig_cost,
+                                new_cost=orig_cost,
+                                old_price=orig_price,
+                                new_price=orig_price,
+                                message="Price unchanged",
+                            )
+                        )
 
             except PartNotFoundError:
                 logger.warning("Part %s not found in Marcone catalog", part_no)
                 stats.not_found += 1
+                if row_cb:
+                    row_cb(
+                        RowUpdateResult(
+                            row_idx=row_idx,
+                            part_no=part_no,
+                            status="not_found",
+                            old_cost=orig_cost,
+                            old_price=orig_price,
+                            message="Not found in Marcone catalog",
+                        )
+                    )
             except MarconeError as exc:
                 logger.error("Error looking up part %s: %s", part_no, exc)
                 stats.errors += 1
+                if row_cb:
+                    row_cb(
+                        RowUpdateResult(
+                            row_idx=row_idx,
+                            part_no=part_no,
+                            status="error",
+                            old_cost=orig_cost,
+                            old_price=orig_price,
+                            message=str(exc),
+                        )
+                    )
             except Exception as exc:  # noqa: BLE001
                 logger.error("Unexpected error looking up part %s: %s", part_no, exc)
                 stats.errors += 1
+                if row_cb:
+                    row_cb(
+                        RowUpdateResult(
+                            row_idx=row_idx,
+                            part_no=part_no,
+                            status="error",
+                            old_cost=orig_cost,
+                            old_price=orig_price,
+                            message=str(exc),
+                        )
+                    )
 
         if not dry_run and stats.updated > 0:
             target_path.parent.mkdir(parents=True, exist_ok=True)

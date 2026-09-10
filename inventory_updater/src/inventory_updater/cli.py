@@ -120,9 +120,15 @@ def main(argv: list[str] | None = None) -> int:
 
     input_path = Path(args.file)
     if not input_path.exists():
-        if input_path.suffix.lower() == ".xslx" and input_path.with_suffix(".xlsx").exists():
+        if (
+            input_path.suffix.lower() == ".xslx"
+            and input_path.with_suffix(".xlsx").exists()
+        ):
             input_path = input_path.with_suffix(".xlsx")
-        elif input_path.suffix.lower() == ".xlsx" and input_path.with_suffix(".xslx").exists():
+        elif (
+            input_path.suffix.lower() == ".xlsx"
+            and input_path.with_suffix(".xslx").exists()
+        ):
             input_path = input_path.with_suffix(".xslx")
     if not input_path.exists():
         sys.stderr.write(f"Error: Inventory file '{input_path}' not found.\n")

@@ -40,7 +40,9 @@ class PriceCache:
             )
             conn.commit()
 
-    def get(self, part_number: str, max_age_seconds: float | None = None) -> PartPricing | None:
+    def get(
+        self, part_number: str, max_age_seconds: float | None = None
+    ) -> PartPricing | None:
         """Retrieve cached pricing if present and not expired."""
         clean_part = part_number.strip().upper()
         with self._get_connection() as conn:
@@ -156,7 +158,9 @@ class PriceCache:
             )
             conn.commit()
 
-    def is_known_missing(self, part_number: str, max_age_seconds: float | None = None) -> bool:
+    def is_known_missing(
+        self, part_number: str, max_age_seconds: float | None = None
+    ) -> bool:
         """Check if part was previously marked not found."""
         clean_part = part_number.strip().upper()
         with self._get_connection() as conn:
@@ -184,4 +188,3 @@ class PriceCache:
                 return False
 
         return True
-

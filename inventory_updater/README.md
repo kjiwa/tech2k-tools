@@ -1,6 +1,6 @@
 # inventory-updater
 
-CLI tool to synchronize inventory Excel files (`InventoryItems.xlsx`) with pricing from Marcone.
+Synchronize inventory Excel files (`Service Fusion Inventory.xlsx`, `InventoryItems.xlsx`) with pricing from Marcone via desktop GUI or CLI.
 
 ## Prerequisites
 
@@ -26,9 +26,31 @@ Edit `.env` and set:
 - `MARCONE_PASSWORD`: Marcone portal password.
 - `MARCONE_ACCOUNT_NUMBER`: Optional account number if your login requires one.
 
-Credentials can also be provided directly via `--username`, `--password`, and `--account-number`.
+Alternatively, configure credentials directly in the GUI using the "Configure Marcone Credentials" dialog. Credentials can also be provided on the CLI via `--username`, `--password`, and `--account-number`.
 
-## Usage
+## Desktop GUI
+
+Launch the graphical interface:
+
+```sh
+uv run inventory-updater-gui
+```
+
+### GUI Features
+
+- **Drag and Drop**: Drag an Excel spreadsheet directly into the drop zone or browse using the file dialog.
+- **Pre-flight Column Validation**: Automatically detects and validates Item Number, Cost, Price, and Supplier headers, displaying row counts before processing.
+- **Update Options**:
+  - Choose pricing fields to update: Both Cost and List Price, Customer Cost Only, or List Price Only.
+  - Set supplier filters and toggle blank supplier handling.
+  - Run dry runs to preview changes without modifying files.
+  - Set row limits for testing.
+- **Live Streaming Table**: Displays row number, part number, lookup status, returned cost, and list price in real time.
+- **Cooperative Cancellation**: Stop an active update at any time without leaving corrupted or half-written workbooks.
+- **One-Click Post Actions**: Once finished, open the resulting spreadsheet directly in Excel or reveal it in Finder/File Explorer.
+- **Credentials & Connection Testing**: Verify Marcone login credentials against the portal with immediate connection status feedback.
+
+## CLI Usage
 
 Execute through `uv run`:
 
@@ -36,7 +58,7 @@ Execute through `uv run`:
 uv run inventory-updater [options]
 ```
 
-By default, the tool reads `InventoryItems.xlsx` in the working directory and outputs changes to `InventoryItems_updated.xlsx`.
+By default, the tool reads `Service Fusion Inventory.xlsx` in the working directory and outputs changes to `<file>_updated.xlsx`.
 
 ### Options
 
@@ -59,7 +81,7 @@ By default, the tool reads `InventoryItems.xlsx` in the working directory and ou
 | `--account-number` | Marcone customer account number override | `MARCONE_ACCOUNT_NUMBER` env var |
 | `-v, --verbose` | Enable debug logging | `false` |
 
-### Examples
+### CLI Examples
 
 Dry run on the first 5 parts:
 
@@ -84,4 +106,5 @@ Assign supplier name to Marcone on all updated items and write to a new file:
 ```sh
 uv run inventory-updater --set-supplier Marcone -o output.xlsx
 ```
+
 

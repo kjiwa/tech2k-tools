@@ -194,9 +194,13 @@ def test_updater_supplier_filter_allows_blank_and_skips_others(tmp_path):
 
     def fake_lookup(part_no):
         if part_no == "WPW10321304":
-            return PartPricing(part_number=part_no, customer_cost=15.25, list_price=27.50)
+            return PartPricing(
+                part_number=part_no, customer_cost=15.25, list_price=27.50
+            )
         elif part_no == "240323002":
-            return PartPricing(part_number=part_no, customer_cost=18.45, list_price=30.00)
+            return PartPricing(
+                part_number=part_no, customer_cost=18.45, list_price=30.00
+            )
         raise PartNotFoundError(part_no)
 
     mock_client.lookup_part.side_effect = fake_lookup
@@ -262,7 +266,10 @@ def test_updater_unexpected_error_logged_and_counted(tmp_path, caplog):
 
     assert stats.errors == 1
     assert stats.updated == 0
-    assert "Unexpected error looking up part ERROR_PART_XYZ: Database disk corruption" in caplog.text
+    assert (
+        "Unexpected error looking up part ERROR_PART_XYZ: Database disk corruption"
+        in caplog.text
+    )
 
 
 def test_updater_set_supplier(tmp_path, sample_excel):
@@ -466,3 +473,50 @@ def test_updater_service_fusion_format(tmp_path, service_fusion_excel):
     assert sheet.cell(row=3, column=9).value == 18.45
     assert sheet.cell(row=3, column=23).value == 18.45
     assert sheet.cell(row=3, column=22).value == "Marcone"
+
+
+def test_get_file_info(sample_excel):
+    from inventory_updater.updater import get_file_info
+
+    info = get_file_info(sample_excel)
+    assert info["file_name"] == "InventoryItems.xlsx"
+    assert info["sheet_name"] == "Items"
+    assert info["row_count"] == 3
+    assert info["has_part_col"] is True
+    assert info["has_cost_col"] is True
+    assert info["has_price_col"] is True
+    assert info["has_supplier_col"] is True
+
+
+def test_updater_row_callback_and_cancellation(tmp_path, sample_excel):
+    mock_client = MagicMock(spec=MarconeClient)
+
+    def fake_lookup(part_no):
+        if part_no == "WPW10321304":
+            return PartPricing(
+                part_number=part_no, customer_cost=15.25, list_price=27.50
+            )
+        return PartPricing(part_number=part_no, customer_cost=18.45, list_price=30.00)
+
+    mock_client.lookup_part.side_effect = fake_lookup
+
+    cache = PriceCache(db_path=str(tmp_path / "cache.sqlite"))
+    updater = InventoryUpdater(client=mock_client, cache=cache)
+
+    row_results = []
+
+    def cancel_after_first():
+        return len(row_results) >= 1
+
+    stats = updater.update_file(
+        input_file=sample_excel,
+        row_cb=row_results.append,
+        cancel_check=cancel_after_first,
+    )
+
+    assert stats.cancelled is True
+    assert len(row_results) == 1
+    assert row_results[0].part_no == "WPW10321304"
+    assert row_results[0].status == "updated"
+    assert row_results[0].new_cost == 15.25
+    assert row_results[0].new_price == 27.50

@@ -12,11 +12,14 @@ authors = [{ name = "tech2k" }]
 dependencies = [
     "marcone",
     "openpyxl>=3.1.2",
+    "pyside6>=6.6.0",
     "python-dotenv>=1.0.0",
 ]
 
 [project.scripts]
 inventory-updater = "inventory_updater.cli:main"
+inventory-updater-gui = "inventory_updater.gui:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/inventory_updater"]
+
