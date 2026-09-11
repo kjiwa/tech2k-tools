@@ -332,8 +332,36 @@ def test_main_window_layout_constraints_and_no_performance_row(qapp):
         options_group.layout().sizeConstraint() == QLayout.SizeConstraint.SetMinimumSize
     )
 
-    window.resize(800, 640)
-    assert options_group.height() >= 200
+    window.resize(840, 640)
+    assert options_group.height() >= 150
+
+    # Verify subtitle does not truncate at minimum window width
+    title_box = window.centralWidget().layout().itemAt(0).layout().itemAt(0).layout()
+    app_sub = title_box.itemAt(1).widget()
+    assert app_sub.width() >= app_sub.sizeHint().width()
+
+    # Verify action bar does not overlap options group at minimum size
+    opt_rect = options_group.geometry()
+    start_btn_top = window.start_btn.mapTo(
+        window.centralWidget(), window.start_btn.rect().topLeft()
+    ).y()
+    assert start_btn_top >= opt_rect.bottom()
+
+    # Verify collapsible behavior and summary
+    assert window.options_content.isVisible()
+    assert not window.options_summary_lbl.isVisible()
+
+    window.options_toggle_btn.click()
+    assert not window.options_content.isVisible()
+    assert window.options_summary_lbl.isVisible()
+    assert "Marcone" in window.options_summary_lbl.text()
+    assert "Save to new file" in window.options_summary_lbl.text()
+    assert options_group.height() < 60
+
+    window.options_toggle_btn.click()
+    assert window.options_content.isVisible()
+    assert not window.options_summary_lbl.isVisible()
+    assert options_group.height() >= 150
 
 
 def test_dark_mode_stylesheets_and_palette():

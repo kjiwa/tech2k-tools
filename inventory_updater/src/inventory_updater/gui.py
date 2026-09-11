@@ -562,18 +562,19 @@ class FileDropArea(QFrame):
 
         self.layout = QVBoxLayout(self)
         self.layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
-        self.layout.setSpacing(10)
+        self.layout.setContentsMargins(12, 8, 12, 8)
+        self.layout.setSpacing(6)
         self.layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         self.empty_widget = QWidget()
         empty_layout = QVBoxLayout(self.empty_widget)
         empty_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        empty_layout.setSpacing(8)
+        empty_layout.setSpacing(4)
 
         icon_lbl = QLabel("📊")
         icon_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         icon_font = QFont()
-        icon_font.setPointSize(32)
+        icon_font.setPointSize(26)
         icon_lbl.setFont(icon_font)
         empty_layout.addWidget(icon_lbl)
 
@@ -705,7 +706,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.setWindowTitle("Tech 2000 Inventory Price Updater")
         self.resize(980, 750)
-        self.setMinimumSize(800, 640)
+        self.setMinimumSize(840, 640)
 
         app_icon = self._load_app_icon()
         if not app_icon.isNull():
@@ -792,6 +793,7 @@ class MainWindow(QMainWindow):
 
     def _build_header(self) -> QHBoxLayout:
         header_row = QHBoxLayout()
+        header_row.setSpacing(8)
         title_box = QVBoxLayout()
         title_box.setSpacing(2)
         app_title = QLabel("Tech 2000 Inventory Price Updater")
@@ -823,26 +825,48 @@ class MainWindow(QMainWindow):
 
     def _build_options_group(self) -> QGroupBox:
         options_group = QGroupBox("Update Options")
-        options_layout = QGridLayout(options_group)
-        options_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
-        options_layout.setVerticalSpacing(10)
-        options_layout.setHorizontalSpacing(16)
-        options_layout.setContentsMargins(16, 14, 16, 14)
+        group_layout = QVBoxLayout(options_group)
+        group_layout.setSizeConstraint(QLayout.SizeConstraint.SetMinimumSize)
+        group_layout.setContentsMargins(14, 10, 14, 12)
+        group_layout.setSpacing(8)
+
+        header_bar = QHBoxLayout()
+        header_bar.setContentsMargins(0, 0, 0, 0)
+        self.options_toggle_btn = QPushButton("▾  Update Options")
+        self.options_toggle_btn.setObjectName("optionsToggleBtn")
+        self.options_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.options_toggle_btn.setToolTip(
+            "Click to collapse or expand update options."
+        )
+        self.options_toggle_btn.clicked.connect(self._toggle_options)
+        header_bar.addWidget(self.options_toggle_btn)
+
+        self.options_summary_lbl = QLabel("")
+        self.options_summary_lbl.setObjectName("optionsSummary")
+        self.options_summary_lbl.setProperty("role", "caption")
+        self.options_summary_lbl.setVisible(False)
+        header_bar.addSpacing(10)
+        header_bar.addWidget(self.options_summary_lbl)
+        header_bar.addStretch(1)
+        group_layout.addLayout(header_bar)
+
+        self.options_content = QWidget()
+        content_layout = QVBoxLayout(self.options_content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(0)
+
+        grid = QGridLayout()
+        grid.setVerticalSpacing(8)
+        grid.setHorizontalSpacing(16)
 
         def make_row_label(text: str) -> QLabel:
             lbl = QLabel(text)
             lbl.setProperty("role", "rowLabel")
             return lbl
 
-        def make_caption(text: str) -> QLabel:
-            lbl = QLabel(text)
-            lbl.setProperty("role", "caption")
-            lbl.setWordWrap(True)
-            return lbl
-
-        dest_box = QVBoxLayout()
-        dest_box.setSpacing(3)
-        dest_row = QHBoxLayout()
+        grid.addWidget(
+            make_row_label("Output file:"), 0, 0, Qt.AlignmentFlag.AlignVCenter
+        )
         self.radio_new_file = QRadioButton("Save to new file (<name>_updated.xlsx)")
         self.radio_new_file.setChecked(True)
         self.radio_new_file.setToolTip(
@@ -852,31 +876,16 @@ class MainWindow(QMainWindow):
         self.radio_overwrite.setToolTip(
             "Directly update the original Excel file in place (corresponds to --in-place in CLI)."
         )
-        dest_row.addWidget(self.radio_new_file)
-        dest_row.addSpacing(24)
-        dest_row.addWidget(self.radio_overwrite)
-        dest_row.addStretch(1)
-        dest_box.addLayout(dest_row)
-        dest_box.addWidget(
-            make_caption(
-                "Choose whether to save results to a separate file copy or overwrite original in place."
-            )
-        )
-        options_layout.addWidget(
-            make_row_label("Output file:"),
-            0,
-            0,
-            Qt.AlignmentFlag.AlignTop,
-        )
-        options_layout.addLayout(dest_box, 0, 1)
+        grid.addWidget(self.radio_new_file, 0, 1, Qt.AlignmentFlag.AlignVCenter)
+        grid.addWidget(self.radio_overwrite, 0, 2, Qt.AlignmentFlag.AlignVCenter)
 
-        filter_box = QVBoxLayout()
-        filter_box.setSpacing(3)
-        filter_row = QHBoxLayout()
+        grid.addWidget(
+            make_row_label("Supplier filter:"), 1, 0, Qt.AlignmentFlag.AlignVCenter
+        )
         self.supplier_combo = QComboBox()
         self.supplier_combo.setEditable(True)
         self.supplier_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
-        self.supplier_combo.setFixedWidth(220)
+        self.supplier_combo.setFixedWidth(230)
         self.supplier_combo.lineEdit().setPlaceholderText("Filter or type vendor...")
         self.supplier_combo.addItem("(All Suppliers - No Filter)")
         self.supplier_combo.addItem("Marcone")
@@ -886,9 +895,7 @@ class MainWindow(QMainWindow):
             "Pick from detected spreadsheet vendors or type a custom filter (corresponds to --supplier-filter in CLI)."
         )
         self.supplier_input = self.supplier_combo.lineEdit()
-
-        filter_row.addWidget(self.supplier_combo)
-        filter_row.addSpacing(24)
+        grid.addWidget(self.supplier_combo, 1, 1, Qt.AlignmentFlag.AlignVCenter)
 
         self.cb_blank_supplier = QCheckBox("Allow blank suppliers")
         self.cb_blank_supplier.setChecked(True)
@@ -896,25 +903,12 @@ class MainWindow(QMainWindow):
             "When checked, rows with an empty vendor column are also updated.\n"
             "Uncheck to only update items with an explicit vendor match (corresponds to --no-allow-blank-supplier in CLI)."
         )
-        filter_row.addWidget(self.cb_blank_supplier)
-        filter_row.addStretch(1)
-        filter_box.addLayout(filter_row)
-        filter_box.addWidget(
-            make_caption(
-                "Filter rows by vendor column. Select '(All Suppliers)' to process every row."
-            )
-        )
-        options_layout.addWidget(
-            make_row_label("Supplier filter:"),
-            1,
-            0,
-            Qt.AlignmentFlag.AlignTop,
-        )
-        options_layout.addLayout(filter_box, 1, 1)
+        grid.addWidget(self.cb_blank_supplier, 1, 2, Qt.AlignmentFlag.AlignVCenter)
 
-        limit_box = QVBoxLayout()
-        limit_box.setSpacing(3)
-        limit_row = QHBoxLayout()
+        grid.addWidget(
+            make_row_label("Row limit:"), 2, 0, Qt.AlignmentFlag.AlignVCenter
+        )
+        lim_row = QHBoxLayout()
         self.limit_spin = QSpinBox()
         self.limit_spin.setRange(0, 100000)
         self.limit_spin.setValue(0)
@@ -923,59 +917,84 @@ class MainWindow(QMainWindow):
             "Cap the number of updated items (0 = all rows).\n"
             "Useful for testing a small batch before running full catalog (corresponds to --limit in CLI)."
         )
-        limit_row.addWidget(self.limit_spin)
-        limit_row.addSpacing(10)
-        lbl_limit_help = QLabel("(0 = update all matching rows)")
-        lbl_limit_help.setProperty("role", "caption")
-        limit_row.addWidget(lbl_limit_help)
-        limit_row.addStretch(1)
-        limit_box.addLayout(limit_row)
-        limit_box.addWidget(
-            make_caption(
-                "Process only the first N matching rows. Set to 0 to update the entire spreadsheet."
-            )
-        )
-        options_layout.addWidget(
-            make_row_label("Row limit:"),
-            2,
-            0,
-            Qt.AlignmentFlag.AlignTop,
-        )
-        options_layout.addLayout(limit_box, 2, 1)
+        lim_row.addWidget(self.limit_spin)
+        lbl_rows = QLabel("rows")
+        lbl_rows.setProperty("role", "caption")
+        lim_row.addWidget(lbl_rows)
+        lim_row.addStretch(1)
+        grid.addLayout(lim_row, 2, 1)
 
-        rules_box = QVBoxLayout()
-        rules_box.setSpacing(3)
-        rules_row = QHBoxLayout()
+        lbl_limit_help = QLabel("(0 = process all matching rows)")
+        lbl_limit_help.setProperty("role", "caption")
+        grid.addWidget(lbl_limit_help, 2, 2, Qt.AlignmentFlag.AlignVCenter)
+
+        grid.addWidget(
+            make_row_label("Update rules:"), 3, 0, Qt.AlignmentFlag.AlignVCenter
+        )
         self.cb_missing_only = QCheckBox("Only update missing prices (blank or zero)")
         self.cb_missing_only.setChecked(False)
         self.cb_missing_only.setToolTip(
             "Only look up parts where cost or price is currently empty or $0.00.\n"
             "Existing pricing will be preserved (corresponds to --only-missing in CLI)."
         )
-        rules_row.addWidget(self.cb_missing_only)
-        rules_row.addSpacing(28)
+        grid.addWidget(self.cb_missing_only, 3, 1, Qt.AlignmentFlag.AlignVCenter)
 
-        self.cb_dry_run = QCheckBox("Dry run (Preview changes without writing)")
+        self.cb_dry_run = QCheckBox("Dry run (preview changes without writing)")
         self.cb_dry_run.setChecked(False)
         self.cb_dry_run.setToolTip(
             "Look up parts and preview changes in the table below without modifying any files (corresponds to --dry-run in CLI)."
         )
-        rules_row.addWidget(self.cb_dry_run)
-        rules_row.addStretch(1)
-        rules_box.addLayout(rules_row)
-        rules_box.addWidget(
-            make_caption(
-                "When unchecked, all matching parts are updated. Check to only fill in missing prices."
-            )
+        grid.addWidget(self.cb_dry_run, 3, 2, Qt.AlignmentFlag.AlignVCenter)
+
+        grid.setColumnStretch(0, 0)
+        grid.setColumnStretch(1, 0)
+        grid.setColumnStretch(2, 1)
+
+        content_layout.addLayout(grid)
+        group_layout.addWidget(self.options_content)
+
+        self.supplier_combo.currentTextChanged.connect(
+            lambda _: self._update_options_summary()
         )
-        options_layout.addWidget(
-            make_row_label("Options:"),
-            3,
-            0,
-            Qt.AlignmentFlag.AlignTop,
-        )
-        options_layout.addLayout(rules_box, 3, 1)
+        self.radio_new_file.toggled.connect(lambda _: self._update_options_summary())
+        self.limit_spin.valueChanged.connect(lambda _: self._update_options_summary())
+        self.cb_missing_only.toggled.connect(lambda _: self._update_options_summary())
+        self.cb_dry_run.toggled.connect(lambda _: self._update_options_summary())
+        self._update_options_summary()
+
         return options_group
+
+    def _toggle_options(self) -> None:
+        is_visible = self.options_content.isVisible()
+        self.options_content.setVisible(not is_visible)
+        if is_visible:
+            self.options_toggle_btn.setText("▸  Update Options")
+            self._update_options_summary()
+            self.options_summary_lbl.setVisible(True)
+        else:
+            self.options_toggle_btn.setText("▾  Update Options")
+            self.options_summary_lbl.setVisible(False)
+
+    def _update_options_summary(self) -> None:
+        parts: list[str] = []
+        supp = self.supplier_combo.currentText().strip()
+        if not supp or supp == "(All Suppliers - No Filter)":
+            parts.append("All Suppliers")
+        else:
+            parts.append(supp)
+        parts.append(
+            "Save to new file"
+            if self.radio_new_file.isChecked()
+            else "Overwrite original"
+        )
+        limit_val = self.limit_spin.value()
+        if limit_val > 0:
+            parts.append(f"Limit: {limit_val:,}")
+        if self.cb_missing_only.isChecked():
+            parts.append("Missing prices only")
+        if self.cb_dry_run.isChecked():
+            parts.append("Dry run")
+        self.options_summary_lbl.setText(" • ".join(parts))
 
     def _build_action_bar(self) -> QHBoxLayout:
         act_row = QHBoxLayout()
@@ -1054,7 +1073,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         main_layout = QVBoxLayout(central)
         main_layout.setSpacing(10)
-        main_layout.setContentsMargins(20, 16, 20, 16)
+        main_layout.setContentsMargins(16, 14, 16, 14)
 
         main_layout.addLayout(self._build_header())
 

@@ -153,18 +153,18 @@ QGroupBox {{
     font-size: 13px;
     border: 1px solid {t["border_subtle"]};
     border-radius: 8px;
-    margin-top: 12px;
-    padding-top: 16px;
+    margin-top: 0px;
+    padding-top: 0px;
     background-color: {t["bg_card"]};
     color: {t["text_primary"]};
 }}
 
 QGroupBox::title {{
-    subcontrol-origin: margin;
-    subcontrol-position: top left;
-    left: 12px;
-    padding: 0 4px;
-    color: {t["text_secondary"]};
+    height: 0px;
+    width: 0px;
+    padding: 0px;
+    margin: 0px;
+    color: transparent;
 }}
 
 QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox {{
@@ -279,6 +279,22 @@ QPushButton#cancelBtn:disabled {{
     color: #ffffff;
 }}
 
+QPushButton#optionsToggleBtn {{
+    background: transparent;
+    border: none;
+    font-weight: 600;
+    font-size: 13px;
+    text-align: left;
+    padding: 3px 6px;
+    border-radius: 4px;
+    color: {t["text_secondary"]};
+}}
+
+QPushButton#optionsToggleBtn:hover {{
+    color: {t["text_primary"]};
+    background-color: {t["bg_subtle"]};
+}}
+
 QProgressBar {{
     border: 1px solid {t["border_subtle"]};
     border-radius: 6px;
@@ -328,7 +344,7 @@ QCheckBox::indicator, QRadioButton::indicator {{
     border: 2px dashed {t["drop_border"]};
     border-radius: 10px;
     background-color: {t["bg_card"]};
-    padding: 14px;
+    padding: 10px;
 }}
 
 #dropArea:hover {{
@@ -340,7 +356,12 @@ QCheckBox::indicator, QRadioButton::indicator {{
     border: 2px dashed {t["drop_active_border"]};
     border-radius: 10px;
     background-color: {t["drop_active_bg"]};
-    padding: 14px;
+    padding: 10px;
+}}
+
+#optionsSummary {{
+    color: {t["text_muted"]};
+    font-size: 11px;
 }}
 
 #connChipConfigured {{
