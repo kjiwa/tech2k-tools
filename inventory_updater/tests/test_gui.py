@@ -335,6 +335,18 @@ def test_main_window_layout_constraints_and_no_performance_row(qapp):
     window.resize(window.minimumSize())
     assert options_group.height() >= 150
 
+    # Verify row limit helper text is adjacent to "rows"
+    lbl_rows = next(
+        lbl for lbl in options_group.findChildren(QLabel) if lbl.text() == "rows"
+    )
+    lbl_help = next(
+        lbl
+        for lbl in options_group.findChildren(QLabel)
+        if "(0 = process all matching rows)" in lbl.text()
+    )
+    assert lbl_rows.parentWidget() == lbl_help.parentWidget()
+    assert lbl_help.x() > lbl_rows.x()
+
     # Verify subtitle does not truncate at minimum window width
     title_box = window.centralWidget().layout().itemAt(0).layout().itemAt(0).layout()
     app_sub = title_box.itemAt(1).widget()

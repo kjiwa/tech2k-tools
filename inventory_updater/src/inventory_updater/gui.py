@@ -912,6 +912,7 @@ class MainWindow(QMainWindow):
             make_row_label("Row limit:"), 2, 0, Qt.AlignmentFlag.AlignVCenter
         )
         lim_row = QHBoxLayout()
+        lim_row.setSpacing(6)
         self.limit_spin = QSpinBox()
         self.limit_spin.setRange(0, 100000)
         self.limit_spin.setValue(0)
@@ -924,12 +925,11 @@ class MainWindow(QMainWindow):
         lbl_rows = QLabel("rows")
         lbl_rows.setProperty("role", "caption")
         lim_row.addWidget(lbl_rows)
-        lim_row.addStretch(1)
-        grid.addLayout(lim_row, 2, 1)
-
         lbl_limit_help = QLabel("(0 = process all matching rows)")
         lbl_limit_help.setProperty("role", "caption")
-        grid.addWidget(lbl_limit_help, 2, 2, Qt.AlignmentFlag.AlignVCenter)
+        lim_row.addWidget(lbl_limit_help)
+        lim_row.addStretch(1)
+        grid.addLayout(lim_row, 2, 1, 1, 2)
 
         grid.addWidget(
             make_row_label("Update rules:"), 3, 0, Qt.AlignmentFlag.AlignVCenter
