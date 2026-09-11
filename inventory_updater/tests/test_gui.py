@@ -332,7 +332,7 @@ def test_main_window_layout_constraints_and_no_performance_row(qapp):
         options_group.layout().sizeConstraint() == QLayout.SizeConstraint.SetMinimumSize
     )
 
-    window.resize(840, 640)
+    window.resize(window.minimumSize())
     assert options_group.height() >= 150
 
     # Verify subtitle does not truncate at minimum window width

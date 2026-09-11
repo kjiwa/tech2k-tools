@@ -729,6 +729,8 @@ class MainWindow(QMainWindow):
                 hints.colorSchemeChanged.connect(self._on_color_scheme_changed)
 
         self._init_ui()
+        min_width = max(840, self.centralWidget().minimumSizeHint().width())
+        self.setMinimumSize(min_width, 640)
         self._apply_theme()
         self._update_connection_chip()
 
@@ -802,6 +804,7 @@ class MainWindow(QMainWindow):
             "Sync Excel inventory spreadsheets with live wholesale pricing from Marcone"
         )
         app_sub.setProperty("role", "subtitle")
+        app_sub.setMinimumWidth(app_sub.sizeHint().width())
         title_box.addWidget(app_title)
         title_box.addWidget(app_sub)
         header_row.addLayout(title_box, 1)
