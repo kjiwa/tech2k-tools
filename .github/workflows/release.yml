@@ -52,7 +52,7 @@ jobs:
           cd ..
 
       - name: Upload macOS artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: macos-artifacts
           path: |
@@ -102,7 +102,7 @@ jobs:
           Compress-Archive -Path dist\Tech2000-InventoryUpdater\* -DestinationPath dist\Tech2000-InventoryUpdater-Windows-x64-Portable.zip -Force
 
       - name: Upload Windows artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: windows-artifacts
           path: |
