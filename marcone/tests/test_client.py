@@ -7,6 +7,7 @@ from marcone.exceptions import (
     AuthenticationError,
     NetworkError,
     PartNotFoundError,
+    RateLimitError,
 )
 
 
@@ -21,11 +22,17 @@ def test_clean_price():
     assert MarconeClient._clean_price("100") == 100.0
     assert MarconeClient._clean_price("") is None
     assert MarconeClient._clean_price("N/A") is None
+    assert MarconeClient._clean_price("-1") is None
+    assert MarconeClient._clean_price("-$10.00") is None
 
 
 def test_login_success(client: MarconeClient):
     with requests_mock.Mocker() as m:
-        m.get("https://test.marcone.com/UserLogin", text="<html>Login</html>", status_code=200)
+        m.get(
+            "https://test.marcone.com/UserLogin",
+            text="<html>Login</html>",
+            status_code=200,
+        )
         m.post(
             "https://test.marcone.com/UserLogin/DoLogin",
             json={"Result": True, "SetShipToReadOnly": False, "Message": ""},
@@ -59,7 +66,9 @@ def test_login_with_customer_number(client: MarconeClient):
             json={"Result": True, "Message": ""},
         )
 
-        assert client.login("user@example.com", "secret", customer_number="123456") is True
+        assert (
+            client.login("user@example.com", "secret", customer_number="123456") is True
+        )
         assert client.is_logged_in is True
 
 
@@ -151,7 +160,10 @@ def test_lookup_part_success(client: MarconeClient):
     <tr id="trListPrice"><td class="green"><b>$21.00</b></td></tr>
     """
     with requests_mock.Mocker() as m:
-        m.post("https://test.marcone.com/Home/GetCartLookupParts", json={"Result": True, "Message": makes_html})
+        m.post(
+            "https://test.marcone.com/Home/GetCartLookupParts",
+            json={"Result": True, "Message": makes_html},
+        )
         m.post("https://test.marcone.com/Product/GetCustomerPrice", text="$12.50")
         m.get("https://test.marcone.com/Product/Detail", text=detail_html)
 
@@ -165,9 +177,15 @@ def test_lookup_part_success(client: MarconeClient):
 
 def test_lookup_part_not_found(client: MarconeClient):
     with requests_mock.Mocker() as m:
-        m.post("https://test.marcone.com/Home/GetCartLookupParts", json={"Result": True, "Message": ""})
+        m.post(
+            "https://test.marcone.com/Home/GetCartLookupParts",
+            json={"Result": True, "Message": ""},
+        )
         m.get("https://test.marcone.com/Product/Detail", text="<html>Not Found</html>")
-        m.get("https://test.marcone.com/Home/SearchPartModelList", text="<html>No items</html>")
+        m.get(
+            "https://test.marcone.com/Home/SearchPartModelList",
+            text="<html>No items</html>",
+        )
 
         with pytest.raises(PartNotFoundError):
             client.lookup_part("NONEXISTENT123")
@@ -185,7 +203,6 @@ def test_request_network_error(client: MarconeClient):
             client._request("GET", "/test", retries=1)
 
 
-
 def test_concurrent_lookups_thread_safety(client: MarconeClient):
     from concurrent.futures import ThreadPoolExecutor
 
@@ -195,7 +212,10 @@ def test_concurrent_lookups_thread_safety(client: MarconeClient):
     <tr id="trListPrice"><td class="green"><b>$21.00</b></td></tr>
     """
     with requests_mock.Mocker() as m:
-        m.post("https://test.marcone.com/Home/GetCartLookupParts", json={"Result": True, "Message": makes_html})
+        m.post(
+            "https://test.marcone.com/Home/GetCartLookupParts",
+            json={"Result": True, "Message": makes_html},
+        )
         m.post("https://test.marcone.com/Product/GetCustomerPrice", text="$12.50")
         m.get("https://test.marcone.com/Product/Detail", text=detail_html)
 
@@ -208,3 +228,35 @@ def test_concurrent_lookups_thread_safety(client: MarconeClient):
             assert res.part_number == f"PART{i}"
             assert res.customer_cost == 12.50
         client.close()
+
+
+def test_parse_retry_after():
+    assert MarconeClient._parse_retry_after("5") == 5.0
+    assert MarconeClient._parse_retry_after("2.5") == 2.5
+    assert MarconeClient._parse_retry_after("invalid", default=3.0) == 3.0
+    assert MarconeClient._parse_retry_after(None, default=2.0) == 2.0
+    assert MarconeClient._parse_retry_after("-10") == 0.0
+
+
+def test_request_rate_limited_exhaustion(client: MarconeClient):
+    with requests_mock.Mocker() as m:
+        m.get(
+            "https://test.marcone.com/test",
+            status_code=429,
+            headers={"Retry-After": "0"},
+        )
+        with pytest.raises(RateLimitError):
+            client._request("GET", "/test", retries=2)
+
+
+def test_context_manager():
+    with MarconeClient(base_url="https://test.marcone.com") as client:
+        assert isinstance(client, MarconeClient)
+
+
+def test_empty_input_helpers(client: MarconeClient):
+    assert client.get_part_makes("  ") == []
+    assert client.get_customer_price(" ", "WPL") is None
+    assert client.get_customer_price("PART", " ") is None
+    assert client.get_product_detail("  ") is None
+    assert client.search_part("  ") is None

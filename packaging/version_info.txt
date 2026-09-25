@@ -2,8 +2,8 @@
 # Windows PE Version Information Resource
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 0, 0, 0),
-    prodvers=(1, 0, 0, 0),
+    filevers=(1, 0, 1, 0),
+    prodvers=(1, 0, 1, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -19,12 +19,12 @@ VSVersionInfo(
           [
             StringStruct('CompanyName', 'Tech 2000'),
             StringStruct('FileDescription', 'Tech 2000 Inventory Price Updater'),
-            StringStruct('FileVersion', '1.0.0.0'),
+            StringStruct('FileVersion', '1.0.1.0'),
             StringStruct('InternalName', 'inventory_updater'),
             StringStruct('LegalCopyright', 'Copyright (c) 2026 Tech 2000'),
             StringStruct('OriginalFilename', 'Tech2000-InventoryUpdater.exe'),
             StringStruct('ProductName', 'Tech 2000 Inventory Price Updater'),
-            StringStruct('ProductVersion', '1.0.0.0'),
+            StringStruct('ProductVersion', '1.0.1.0'),
           ]
         )
       ]
