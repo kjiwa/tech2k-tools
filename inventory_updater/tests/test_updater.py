@@ -489,6 +489,24 @@ def test_get_file_info(sample_excel):
     assert info["suppliers"] == ["Marcone"]
 
 
+def test_get_file_info_no_recognized_columns(tmp_path):
+    from inventory_updater.updater import get_file_info
+
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "Sheet1"
+    ws.append(["Foo", "Bar", "Baz"])
+    ws.append(["x", "y", "z"])
+    path = tmp_path / "unrecognized.xlsx"
+    wb.save(path)
+
+    info = get_file_info(path)
+    assert info["has_part_col"] is False
+    assert info["has_cost_col"] is False
+    assert info["has_price_col"] is False
+    assert info["has_supplier_col"] is False
+
+
 def test_updater_row_callback_and_cancellation(tmp_path, sample_excel):
     mock_client = MagicMock(spec=MarconeClient)
 

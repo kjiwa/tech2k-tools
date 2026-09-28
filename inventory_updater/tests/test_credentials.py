@@ -60,6 +60,41 @@ def test_check_connection_failure():
         assert "Login failed: Invalid login" in msg
 
 
+def test_get_default_env_path_ignores_parent_dirs(tmp_path, monkeypatch):
+    from inventory_updater.credentials import get_default_env_path, get_user_config_dir
+
+    parent_env = tmp_path / ".env"
+    parent_env.write_text("MARCONE_USERNAME=parent\n")
+    child_dir = tmp_path / "child"
+    child_dir.mkdir()
+
+    monkeypatch.setattr(
+        "inventory_updater.credentials.Path.cwd", lambda: child_dir
+    )
+
+    env_path = get_default_env_path()
+    assert env_path != parent_env
+    assert env_path == get_user_config_dir() / ".env"
+
+
+def test_save_credentials_chmod_0600_on_existing_file(tmp_path):
+    import stat
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("MARCONE_USERNAME=old\n")
+    env_file.chmod(0o644)
+
+    with patch.dict("os.environ", {}, clear=True):
+        save_credentials(
+            username="newuser",
+            password="newpassword",
+            env_path=env_file,
+        )
+
+    mode = stat.S_IMODE(env_file.stat().st_mode)
+    assert mode == 0o600
+
+
 def test_get_user_config_dir(monkeypatch):
     from pathlib import Path
 

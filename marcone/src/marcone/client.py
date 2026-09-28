@@ -327,6 +327,11 @@ class MarconeClient:
         if resp.status_code != 200:
             return []
 
+        if "/UserLogin" in resp.url:
+            raise AuthenticationError(
+                "Session expired or unauthorized while fetching part makes"
+            )
+
         try:
             data = resp.json()
             html = data.get("Message") or ""
@@ -351,6 +356,11 @@ class MarconeClient:
         )
         if resp.status_code != 200:
             return None
+
+        if "/UserLogin" in resp.url:
+            raise AuthenticationError(
+                "Session expired or unauthorized while fetching customer price"
+            )
 
         text = resp.text.strip().strip('"').strip("'")
         if not text or text == "-1":
@@ -500,7 +510,10 @@ class MarconeClient:
         stock_el = soup.select_one("span.a-color-success, span.spanInstock")
         if not stock_el:
             return None
-        return "in stock" in stock_el.get_text().lower()
+        text = stock_el.get_text().lower()
+        if "not in stock" in text or "out of stock" in text:
+            return False
+        return "in stock" in text
 
     @staticmethod
     def _extract_description(soup: BeautifulSoup) -> str | None:

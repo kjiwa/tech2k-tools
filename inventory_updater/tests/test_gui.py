@@ -33,7 +33,7 @@ def test_excel_file(tmp_path):
     wb = openpyxl.Workbook()
     sheet = wb.active
     sheet.title = "Items"
-    sheet.append(["Item #", "Cost", "Price", "Vendor"])
+    sheet.append(["Part No", "Cost", "Price", "Vendor"])
     sheet.append(["WPW10321304", 10.0, 20.0, "Marcone"])
     sheet.append(["240323002", "", 0, "Marcone"])
     wb.save(file_path)

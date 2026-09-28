@@ -71,6 +71,7 @@ def get_file_info(file_path: str | Path) -> dict[str, Any]:
 
     first_row = next(sheet.iter_rows(values_only=True), None)
     headers = list(first_row) if first_row else []
+    detected = InventoryUpdater._detect_columns(headers, apply_defaults=False)
     col_map = InventoryUpdater._detect_columns(headers)
 
     row_count = sheet.max_row - 1 if sheet.max_row and sheet.max_row > 1 else 0
@@ -85,10 +86,10 @@ def get_file_info(file_path: str | Path) -> dict[str, Any]:
         "sheet_name": sheet.title,
         "row_count": max(0, row_count),
         "headers": [str(h) for h in headers if h is not None],
-        "has_part_col": "part" in col_map,
-        "has_cost_col": "cost" in col_map or "avg_cost" in col_map,
-        "has_price_col": "price" in col_map,
-        "has_supplier_col": "supplier" in col_map,
+        "has_part_col": "part" in detected,
+        "has_cost_col": "cost" in detected or "avg_cost" in detected,
+        "has_price_col": "price" in detected,
+        "has_supplier_col": "supplier" in detected,
         "suppliers": unique_suppliers,
     }
 
@@ -598,8 +599,16 @@ class InventoryUpdater:
             return None, exc
 
     @staticmethod
-    def _detect_columns(headers: list[object]) -> dict[str, int]:
-        """Map header names to 1-based column indices."""
+    def _detect_columns(
+        headers: list[object], apply_defaults: bool = True
+    ) -> dict[str, int]:
+        """Map header names to 1-based column indices.
+
+        When ``apply_defaults`` is False, only headers actually recognized
+        from ``headers`` are returned, without the positional fallbacks used
+        for processing an inventory file whose headers don't match any known
+        name.
+        """
         mapping: dict[str, int] = {}
         for idx, h in enumerate(headers, start=1):
             if not h:
@@ -622,6 +631,9 @@ class InventoryUpdater:
                 mapping.setdefault("supplier", idx)
             elif "manufacturer" in h_str or h_str == "make":
                 mapping.setdefault("make", idx)
+
+        if not apply_defaults:
+            return mapping
 
         mapping.setdefault("part", 1)
         if "cost" not in mapping and "avg_cost" in mapping:

@@ -129,6 +129,38 @@ def test_get_customer_price(client: MarconeClient):
         assert client.get_customer_price("UNKNOWN", "FRG") is None
 
 
+def test_get_customer_price_session_expired(client: MarconeClient):
+    with requests_mock.Mocker() as m:
+        m.post(
+            "https://test.marcone.com/Product/GetCustomerPrice",
+            status_code=302,
+            headers={"Location": "https://test.marcone.com/UserLogin"},
+        )
+        m.get(
+            "https://test.marcone.com/UserLogin",
+            text="<html>Login</html>",
+        )
+
+        with pytest.raises(AuthenticationError):
+            client.get_customer_price("240323002", "FRG")
+
+
+def test_get_part_makes_session_expired(client: MarconeClient):
+    with requests_mock.Mocker() as m:
+        m.post(
+            "https://test.marcone.com/Home/GetCartLookupParts",
+            status_code=302,
+            headers={"Location": "https://test.marcone.com/UserLogin"},
+        )
+        m.get(
+            "https://test.marcone.com/UserLogin",
+            text="<html>Login</html>",
+        )
+
+        with pytest.raises(AuthenticationError):
+            client.get_part_makes("240323002")
+
+
 def test_get_product_detail(client: MarconeClient):
     html = """
     <input type="hidden" id="ProductDetailMake" value="FRG" />
@@ -151,6 +183,20 @@ def test_get_product_detail(client: MarconeClient):
         assert detail.core_charge == 5.00
         assert detail.in_stock is True
         assert detail.description == "DOOR BIN"
+
+
+def test_get_product_detail_out_of_stock(client: MarconeClient):
+    html = """
+    <table id="tblPricing">
+        <tr id="trPrice"><td class="priceblock_ourprice">$18.45</td></tr>
+    </table>
+    <span class="a-color-success">Not in Stock</span>
+    """
+    with requests_mock.Mocker() as m:
+        m.get("https://test.marcone.com/Product/Detail", text=html)
+        detail = client.get_product_detail("240323002", "FRG")
+        assert detail is not None
+        assert detail.in_stock is False
 
 
 def test_lookup_part_success(client: MarconeClient):

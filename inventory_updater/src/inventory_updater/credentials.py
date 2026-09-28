@@ -26,11 +26,6 @@ def get_default_env_path() -> Path:
     cwd_env = Path.cwd() / ".env"
     if cwd_env.exists():
         return cwd_env
-    # Check parents
-    for parent in Path.cwd().parents:
-        candidate = parent / ".env"
-        if candidate.exists():
-            return candidate
     user_env = get_user_config_dir() / ".env"
     if user_env.exists():
         return user_env
@@ -83,6 +78,7 @@ def save_credentials(
     set_key(str(path), "MARCONE_PASSWORD", password)
     if account_number:
         set_key(str(path), "MARCONE_ACCOUNT_NUMBER", account_number)
+    path.chmod(0o600)
 
     os.environ["MARCONE_USERNAME"] = username
     os.environ["MARCONE_PASSWORD"] = password

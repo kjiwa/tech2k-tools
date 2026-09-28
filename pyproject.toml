@@ -1,6 +1,7 @@
 [project]
 name = "tech2k-tools"
 version = "1.0.1"
+license = "MIT"
 requires-python = ">=3.10"
 dependencies = [
     "marcone",
