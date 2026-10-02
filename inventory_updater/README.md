@@ -41,6 +41,24 @@ Launch the graphical interface:
 uv run inventory-updater-gui
 ```
 
+### Demo Mode
+
+Smoke-test the GUI without Marcone portal credentials using canned pricing:
+
+```sh
+uv run inventory-updater-gui --demo
+```
+
+In demo mode:
+- Credential checks are bypassed and lookups use a fake Marcone client returning canned prices.
+- Local cache writes use an isolated temporary database.
+- A committed sample spreadsheet is provided at `samples/sample_inventory.xlsx`.
+- To regenerate the sample spreadsheet:
+
+```sh
+uv run python scripts/generate_sample_xlsx.py
+```
+
 ![Tech 2000 Inventory Price Updater](docs/gui_screenshot.png)
 
 ### Features

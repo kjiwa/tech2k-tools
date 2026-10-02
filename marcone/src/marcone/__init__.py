@@ -7,11 +7,13 @@ from marcone.exceptions import (
     PartNotFoundError,
     RateLimitError,
 )
+from marcone.fake import FakeMarconeClient
 from marcone.models import PartPricing
 
 __all__ = [
     "AccountSelectionRequiredError",
     "AuthenticationError",
+    "FakeMarconeClient",
     "MarconeClient",
     "MarconeError",
     "NetworkError",
@@ -19,3 +21,4 @@ __all__ = [
     "PartPricing",
     "RateLimitError",
 ]
+

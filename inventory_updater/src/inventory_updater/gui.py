@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import argparse
 import os
 import platform
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -91,6 +93,7 @@ class UpdateWorker(QThread):
         throttle_seconds: float = 0.2,
         cache_chunk_size: int = 500,
         lookahead: int | None = None,
+        demo: bool = False,
         parent: QObject | None = None,
     ) -> None:
         super().__init__(parent)
@@ -111,15 +114,25 @@ class UpdateWorker(QThread):
         self.throttle_seconds = throttle_seconds
         self.cache_chunk_size = cache_chunk_size
         self.lookahead = lookahead
+        self.demo = demo
         self._is_cancelled = False
 
     def cancel(self) -> None:
         self._is_cancelled = True
 
     def run(self) -> None:
-        client = MarconeClient(throttle_seconds=self.throttle_seconds)
+        if self.demo:
+            from marcone.fake import FakeMarconeClient
+
+            client: Any = FakeMarconeClient(throttle_seconds=self.throttle_seconds)
+        else:
+            client = MarconeClient(throttle_seconds=self.throttle_seconds)
+        temp_cache_dir: tempfile.TemporaryDirectory[str] | None = None
         try:
-            self.status_signal.emit(f"Connecting to Marcone as {self.username}...")
+            if self.demo:
+                self.status_signal.emit("Connecting to fake Marcone client (demo mode)...")
+            else:
+                self.status_signal.emit(f"Connecting to Marcone as {self.username}...")
             client.login(
                 username=self.username,
                 password=self.password,
@@ -127,8 +140,13 @@ class UpdateWorker(QThread):
             )
 
             self.status_signal.emit("Initializing price cache...")
+            cache_path = self.cache_file
+            if self.demo:
+                temp_cache_dir = tempfile.TemporaryDirectory(prefix="marcone_demo_cache_")
+                cache_path = str(Path(temp_cache_dir.name) / "demo_cache.sqlite")
+
             cache = PriceCache(
-                db_path=self.cache_file, chunk_size=self.cache_chunk_size
+                db_path=cache_path, chunk_size=self.cache_chunk_size
             )
             updater = InventoryUpdater(
                 client=client,
@@ -169,6 +187,8 @@ class UpdateWorker(QThread):
             self.error_signal.emit(f"Unexpected error: {exc}")
         finally:
             client.close()
+            if temp_cache_dir is not None:
+                temp_cache_dir.cleanup()
 
 
 class ConnectionTestWorker(QThread):
@@ -702,9 +722,15 @@ class FileDropArea(QFrame):
 class MainWindow(QMainWindow):
     """Main desktop application window."""
 
-    def __init__(self) -> None:
+    def __init__(self, demo: bool = False) -> None:
         super().__init__()
-        self.setWindowTitle("Tech 2000 Inventory Price Updater")
+        self.demo = demo
+        title = (
+            "Tech 2000 Inventory Price Updater (Demo Mode)"
+            if demo
+            else "Tech 2000 Inventory Price Updater"
+        )
+        self.setWindowTitle(title)
         self.resize(980, 750)
         self.setMinimumSize(840, 640)
 
@@ -1100,6 +1126,13 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(self._build_results_table(), 1)
 
     def _update_connection_chip(self) -> None:
+        if self.demo:
+            self.conn_chip.setText("● Marcone: Demo Mode")
+            self.conn_chip.setObjectName("connChipConfigured")
+            self.conn_chip.style().unpolish(self.conn_chip)
+            self.conn_chip.style().polish(self.conn_chip)
+            return
+
         creds = load_credentials()
         if creds.get("username"):
             self.conn_chip.setText(f"● Marcone: {creds['username']}")
@@ -1120,6 +1153,10 @@ class MainWindow(QMainWindow):
     def _on_file_selected(self, file_path: str) -> None:
         self.selected_file_path = Path(file_path)
         self._populate_suppliers()
+        if self.demo:
+            self.start_btn.setEnabled(True)
+            return
+
         creds = load_credentials()
         if creds.get("username") and creds.get("password"):
             self.start_btn.setEnabled(True)
@@ -1195,10 +1232,18 @@ class MainWindow(QMainWindow):
         if not self.selected_file_path:
             return
 
-        creds = load_credentials()
-        if not creds.get("username") or not creds.get("password"):
-            self._open_credentials()
-            return
+        if self.demo:
+            username = "demo"
+            password = "demo"
+            account_number = ""
+        else:
+            creds = load_credentials()
+            if not creds.get("username") or not creds.get("password"):
+                self._open_credentials()
+                return
+            username = creds["username"]
+            password = creds["password"]
+            account_number = creds.get("account_number", "")
 
         self.output_file_path = self._determine_output_path(self.selected_file_path)
         self._reset_run_state()
@@ -1216,13 +1261,14 @@ class MainWindow(QMainWindow):
             allow_blank_supplier=self.cb_blank_supplier.isChecked(),
             only_missing=self.cb_missing_only.isChecked(),
             limit=limit_val,
-            username=creds["username"],
-            password=creds["password"],
-            account_number=creds.get("account_number", ""),
+            username=username,
+            password=password,
+            account_number=account_number,
             workers=self.workers_spin.value(),
             throttle_seconds=self.throttle_spin.value(),
             cache_chunk_size=self.batch_spin.value(),
             lookahead=lookahead_val,
+            demo=self.demo,
             parent=self,
         )
 
@@ -1319,9 +1365,24 @@ class MainWindow(QMainWindow):
             subprocess.run(["xdg-open", folder], check=False)
 
 
+def parse_gui_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, list[str]]:
+    """Parse command line arguments for the GUI application."""
+    parser = argparse.ArgumentParser(
+        description="Tech 2000 Inventory Price Updater GUI",
+    )
+    parser.add_argument(
+        "--demo",
+        action="store_true",
+        help="Run in demo mode with fake Marcone pricing and no account required",
+    )
+    return parser.parse_known_args(argv)
+
+
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the GUI application."""
-    app = QApplication(argv or sys.argv)
+    raw_args = sys.argv[1:] if argv is None else argv
+    args, unknown = parse_gui_args(raw_args)
+    app = QApplication([sys.argv[0]] + unknown)
     app.setApplicationName("Tech 2000 Inventory Price Updater")
     app.setApplicationDisplayName("Tech 2000 Inventory Price Updater")
     app_icon = MainWindow._load_app_icon()
@@ -1333,9 +1394,10 @@ def main(argv: list[str] | None = None) -> int:
         if hasattr(hints, "colorScheme"):
             is_dark = hints.colorScheme() == Qt.ColorScheme.Dark
     app.setStyleSheet(get_stylesheet(dark=is_dark))
-    window = MainWindow()
+    window = MainWindow(demo=args.demo)
     window.show()
     return app.exec()
+
 
 
 if __name__ == "__main__":

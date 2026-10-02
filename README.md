@@ -35,6 +35,8 @@ Launch the desktop GUI:
 
 ```sh
 uv run inventory-updater-gui
+# Or run with fake client and canned pricing (no Marcone credentials required):
+uv run inventory-updater-gui --demo
 ```
 
 Run the CLI:

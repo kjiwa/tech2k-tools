@@ -13,6 +13,7 @@ from inventory_updater.gui import (
     FileDropArea,
     MainWindow,
     UpdateWorker,
+    parse_gui_args,
 )
 from inventory_updater.styles import get_status_colors, get_stylesheet
 from inventory_updater.updater import RowUpdateResult, UpdateStats
@@ -423,3 +424,82 @@ def test_credentials_dialog_fields_and_subaccount(qapp):
     assert dlg.user_input.placeholderText() == "e.g. 123456 or user@example.com"
     assert dlg.pass_input.placeholderText() == "Your Marcone password"
     assert dlg.acc_input.placeholderText() == "Leave blank if not required"
+
+
+def test_parse_gui_args_defaults():
+    args, unknown = parse_gui_args([])
+    assert args.demo is False
+    assert unknown == []
+
+
+def test_parse_gui_args_demo():
+    args, unknown = parse_gui_args(["--demo", "-platform", "offscreen"])
+    assert args.demo is True
+    assert unknown == ["-platform", "offscreen"]
+
+
+def test_main_window_demo_mode_ui(qapp):
+    window = MainWindow(demo=True)
+    assert window.demo is True
+    assert "Demo Mode" in window.windowTitle()
+    assert "Demo Mode" in window.conn_chip.text()
+    assert window.conn_chip.objectName() == "connChipConfigured"
+
+
+def test_main_window_demo_mode_file_selection(qapp, test_excel_file):
+    window = MainWindow(demo=True)
+    with (
+        patch(
+            "inventory_updater.gui.load_credentials",
+            return_value={"username": "", "password": ""},
+        ),
+        patch.object(window, "_open_credentials") as mock_open_creds,
+    ):
+        window._on_file_selected(str(test_excel_file))
+        mock_open_creds.assert_not_called()
+        assert window.start_btn.isEnabled() is True
+
+
+
+def test_update_worker_demo_mode(qapp, test_excel_file, tmp_path):
+    out_file = tmp_path / "demo_output.xlsx"
+    results = []
+    statuses = []
+
+    worker = UpdateWorker(
+        input_file=test_excel_file,
+        output_file=out_file,
+        field="both",
+        dry_run=False,
+        supplier_filter=None,
+        allow_blank_supplier=True,
+        only_missing=False,
+        limit=None,
+        username="",
+        password="",
+        demo=True,
+    )
+    worker.row_result_signal.connect(results.append)
+    worker.status_signal.connect(statuses.append)
+    worker.run()
+
+    assert out_file.exists()
+    assert any("demo mode" in s for s in statuses)
+    assert len(results) == 2
+    # Check that prices were updated with canned prices
+    updated = {r.part_no: r for r in results}
+    assert "WPW10321304" in updated
+    assert updated["WPW10321304"].new_cost == 15.50
+    assert updated["WPW10321304"].new_price == 24.99
+
+
+def test_main_window_demo_mode_start_worker(qapp, test_excel_file):
+    window = MainWindow(demo=True)
+    window._on_file_selected(str(test_excel_file))
+    with patch.object(UpdateWorker, "start"):
+        window._on_start()
+        assert window.worker is not None
+        assert window.worker.demo is True
+        assert window.worker.username == "demo"
+        assert window.worker.password == "demo"
+
