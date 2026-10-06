@@ -1,6 +1,6 @@
 [project]
 name = "tech2k-tools"
-version = "1.0.1"
+version = "1.1.0"
 license = "MIT"
 requires-python = ">=3.10"
 dependencies = [
