@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 1.1.0
+
 `inventory-updater-gui --demo` runs the GUI against a fake Marcone client with
 canned pricing and a bundled sample spreadsheet, so no credentials or network
 access are needed.
