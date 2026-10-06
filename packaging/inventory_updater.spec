@@ -1,11 +1,9 @@
 # -*- mode: python ; coding: utf-8 -*-
 from __future__ import annotations
 
-import os
 import sys
+import tomllib
 from pathlib import Path
-
-block_cipher = None
 
 SPEC_DIR = Path(SPECPATH).resolve() if "SPECPATH" in globals() else Path("packaging").resolve()
 REPO_ROOT = SPEC_DIR.parent
@@ -31,7 +29,59 @@ if is_darwin and (PKG_DIR / "icon.icns").exists():
 elif is_windows and (PKG_DIR / "icon.ico").exists():
     icon_file = str(PKG_DIR / "icon.ico")
 
-version_file = str(PKG_DIR / "version_info.txt") if is_windows else None
+def read_version():
+    with open(REPO_ROOT / "pyproject.toml", "rb") as f:
+        return tomllib.load(f)["project"]["version"]
+
+
+def windows_version_info(version):
+    from PyInstaller.utils.win32.versioninfo import (
+        FixedFileInfo,
+        StringFileInfo,
+        StringStruct,
+        StringTable,
+        VarFileInfo,
+        VarStruct,
+        VSVersionInfo,
+    )
+
+    parts = tuple(int(p) for p in version.split(".")) + (0,)
+    dotted = ".".join(str(p) for p in parts)
+    return VSVersionInfo(
+        ffi=FixedFileInfo(
+            filevers=parts,
+            prodvers=parts,
+            mask=0x3F,
+            flags=0x0,
+            OS=0x40004,
+            fileType=0x1,
+            subtype=0x0,
+            date=(0, 0),
+        ),
+        kids=[
+            StringFileInfo(
+                [
+                    StringTable(
+                        "040904B0",
+                        [
+                            StringStruct("CompanyName", "Tech 2000"),
+                            StringStruct("FileDescription", "Tech 2000 Inventory Price Updater"),
+                            StringStruct("FileVersion", dotted),
+                            StringStruct("InternalName", "inventory_updater"),
+                            StringStruct("LegalCopyright", "Copyright (c) 2026 Tech 2000"),
+                            StringStruct("OriginalFilename", "Tech2000-InventoryUpdater.exe"),
+                            StringStruct("ProductName", "Tech 2000 Inventory Price Updater"),
+                            StringStruct("ProductVersion", dotted),
+                        ],
+                    )
+                ]
+            ),
+            VarFileInfo([VarStruct("Translation", [1033, 1200])]),
+        ],
+    )
+
+
+version_file = windows_version_info(read_version()) if is_windows else None
 
 a = Analysis(
     [str(SRC_INVENTORY / "inventory_updater" / "gui.py")],
@@ -66,13 +116,10 @@ a = Analysis(
         "ruff",
         "IPython",
     ],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False,
 )
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure, a.zipped_data)
 
 exe = EXE(
     pyz,
@@ -114,8 +161,8 @@ if is_darwin:
             "CFBundleName": "Tech 2000 Inventory Price Updater",
             "CFBundleDisplayName": "Tech 2000 Inventory Price Updater",
             "CFBundleIdentifier": "com.tech2k.inventoryupdater",
-            "CFBundleVersion": "1.0.1",
-            "CFBundleShortVersionString": "1.0.1",
+            "CFBundleVersion": read_version(),
+            "CFBundleShortVersionString": read_version(),
             "CFBundlePackageType": "APPL",
             "CFBundleSignature": "????",
             "NSHighResolutionCapable": True,

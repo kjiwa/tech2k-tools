@@ -66,6 +66,16 @@ The client manages session cookies, request throttling across threads via a glob
 - `search_part(part_number: str) -> PartPricing | None`: Fallback search query for parts without direct detail pages.
 - `close() -> None`: Close primary and worker HTTP sessions.
 
+### FakeMarconeClient
+
+```python
+from marcone import FakeMarconeClient
+
+FakeMarconeClient(canned_prices: dict[str, PartPricing] | None = None)
+```
+
+Offline stand-in for `MarconeClient` that serves canned pricing without credentials or network access. Part numbers are matched case-insensitively; unknown parts raise `PartNotFoundError`. `canned_prices` replaces the built-in sample catalog (`DEFAULT_CANNED_PRICES`). Provides the same lookup methods, context manager protocol, and `close()`, plus an `is_logged_in` property that becomes `True` after `login()`. The updater GUI uses it for `--demo`.
+
 ### Models
 
 #### PartPricing
@@ -90,7 +100,7 @@ Property:
 
 - `MarconeError`: Base exception for client errors.
 - `AuthenticationError`: Invalid credentials, blocked account, or expired session.
-- `AccountSelectionRequiredError`: Multi-account login requiring `customer_number`. Exposes `customer_numbers` attribute.
+- `AccountSelectionRequiredError`: Multi-account login requiring `customer_number`.
 - `PartNotFoundError`: Requested part number does not exist in portal catalog.
 - `RateLimitError`: HTTP 429 response or retry budget exceeded.
 - `NetworkError`: HTTP connection failure, DNS resolution failure, or timeout.

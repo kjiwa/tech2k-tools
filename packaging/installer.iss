@@ -1,13 +1,15 @@
 ; Inno Setup Script for Tech 2000 Inventory Price Updater
 #define MyAppName "Tech 2000 Inventory Price Updater"
-#define MyAppVersion "1.0.1"
+#ifndef AppVersion
+  #error AppVersion must be passed on the command line: iscc /DAppVersion=X.Y.Z
+#endif
 #define MyAppPublisher "Tech 2000"
 #define MyAppExeName "Tech2000-InventoryUpdater.exe"
 
 [Setup]
 AppId={{D37F2C5A-5D8A-454E-9F7C-9037A2F08821}
 AppName={#MyAppName}
-AppVersion={#MyAppVersion}
+AppVersion={#AppVersion}
 AppPublisher={#MyAppPublisher}
 DefaultDirName={autopf}\Tech 2000\Inventory Price Updater
 DefaultGroupName={#MyAppPublisher}

@@ -1,5 +1,7 @@
+import sqlite3
 import time
 
+import pytest
 from inventory_updater.cache import PriceCache
 from marcone.models import PartPricing
 
@@ -76,9 +78,7 @@ def test_cache_get_many_custom_chunk_size(tmp_path):
     for i in range(5):
         cache.set(PartPricing(part_number=f"PART{i}", customer_cost=float(i)))
 
-    cached_map, missing_set = cache.get_many(
-        [f"PART{i}" for i in range(5)], chunk_size=2
-    )
+    cached_map, missing_set = cache.get_many([f"PART{i}" for i in range(5)], chunk_size=2)
     assert len(cached_map) == 5
     assert len(missing_set) == 0
 
@@ -103,18 +103,45 @@ def test_cache_concurrent_writes(tmp_path):
     assert len(missing_set) == 25
 
 
-def test_user_cache_dir(monkeypatch, tmp_path):
-    from inventory_updater.cache import get_default_cache_path, get_user_cache_dir
+def test_user_cache_dir(monkeypatch):
+    from inventory_updater.cache import get_user_cache_dir
 
     monkeypatch.setattr("platform.system", lambda: "Windows")
     monkeypatch.setenv("LOCALAPPDATA", "C:\\Users\\Test\\AppData\\Local")
-    win_dir = get_user_cache_dir()
-    assert "tech2k-tools" in str(win_dir)
+    assert "tech2k-tools" in str(get_user_cache_dir())
 
     monkeypatch.setattr("platform.system", lambda: "Darwin")
-    mac_dir = get_user_cache_dir()
-    assert "Caches" in str(mac_dir)
+    assert "Caches" in str(get_user_cache_dir())
 
-    monkeypatch.setattr("inventory_updater.cache.Path.cwd", lambda: tmp_path)
-    cache_path = get_default_cache_path()
-    assert cache_path == str(mac_dir / "marcone_prices.sqlite")
+
+def test_default_cache_path_is_user_cache_even_in_project_dir(isolated_workspace):
+    from inventory_updater.cache import get_default_cache_path, get_user_cache_dir
+
+    (isolated_workspace / ".cache").mkdir()
+    assert get_default_cache_path() == str(get_user_cache_dir() / "marcone_prices.sqlite")
+
+    PriceCache()
+    assert list((isolated_workspace / ".cache").iterdir()) == []
+
+
+def test_cache_closes_every_connection(tmp_path, monkeypatch):
+    opened = []
+    real_connect = sqlite3.connect
+
+    def recording_connect(*args, **kwargs):
+        conn = real_connect(*args, **kwargs)
+        opened.append(conn)
+        return conn
+
+    monkeypatch.setattr(sqlite3, "connect", recording_connect)
+    cache = PriceCache(db_path=str(tmp_path / "cache.sqlite"))
+    cache.set(PartPricing(part_number="A1", customer_cost=1.0))
+    cache.set_not_found("B2")
+    cache.get("A1")
+    cache.get_many(["A1", "B2"])
+    cache.is_known_missing("B2")
+
+    assert len(opened) >= 6
+    for conn in opened:
+        with pytest.raises(sqlite3.ProgrammingError):
+            conn.execute("SELECT 1")

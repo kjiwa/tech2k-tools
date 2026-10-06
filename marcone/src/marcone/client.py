@@ -168,12 +168,8 @@ class MarconeClient:
                 response = session.request(method, url, **kwargs)
                 if response.status_code == 429:
                     if attempt == max_attempts - 1:
-                        raise RateLimitError(
-                            "Exceeded max retries due to server rate limiting"
-                        )
-                    retry_after = self._parse_retry_after(
-                        response.headers.get("Retry-After")
-                    )
+                        raise RateLimitError("Exceeded max retries due to server rate limiting")
+                    retry_after = self._parse_retry_after(response.headers.get("Retry-After"))
                     logger.warning(
                         "Rate limited (429). Retrying after %.1f seconds...",
                         retry_after,
@@ -197,8 +193,6 @@ class MarconeClient:
                 logger.warning("Connection failure. Retrying in %.1fs...", sleep_time)
                 time.sleep(sleep_time)
 
-        raise RateLimitError("Exceeded max retries due to server rate limiting")
-
     def login(
         self,
         username: str,
@@ -219,28 +213,20 @@ class MarconeClient:
     def _load_login_page(self) -> None:
         init_resp = self._request("GET", "/UserLogin")
         if init_resp.status_code != 200:
-            raise NetworkError(
-                f"Failed to load login page: HTTP {init_resp.status_code}"
-            )
+            raise NetworkError(f"Failed to load login page: HTTP {init_resp.status_code}")
 
     def _submit_login(self, username: str, password: str) -> dict[str, Any]:
         post_headers = self._ajax_headers("/UserLogin")
-        post_headers["Content-Type"] = (
-            "application/x-www-form-urlencoded; charset=UTF-8"
-        )
+        post_headers["Content-Type"] = "application/x-www-form-urlencoded; charset=UTF-8"
         post_data = {
             "UserName": username,
             "Password": password,
             "RememberMe": "true",
             "code": "",
         }
-        resp = self._request(
-            "POST", "/UserLogin/DoLogin", headers=post_headers, data=post_data
-        )
+        resp = self._request("POST", "/UserLogin/DoLogin", headers=post_headers, data=post_data)
         if resp.status_code != 200:
-            raise AuthenticationError(
-                f"Login request failed with HTTP {resp.status_code}"
-            )
+            raise AuthenticationError(f"Login request failed with HTTP {resp.status_code}")
         try:
             return resp.json()
         except ValueError as exc:
@@ -303,11 +289,7 @@ class MarconeClient:
             val = option.get("value")
             raw_text = val if val is not None else option.get_text()
             clean_val = str(raw_text).strip().strip("-").strip()
-            if (
-                clean_val
-                and not clean_val.lower().startswith("select")
-                and clean_val not in makes
-            ):
+            if clean_val and not clean_val.lower().startswith("select") and clean_val not in makes:
                 makes.append(clean_val)
         return makes
 
@@ -328,9 +310,7 @@ class MarconeClient:
             return []
 
         if "/UserLogin" in resp.url:
-            raise AuthenticationError(
-                "Session expired or unauthorized while fetching part makes"
-            )
+            raise AuthenticationError("Session expired or unauthorized while fetching part makes")
 
         try:
             data = resp.json()
@@ -368,9 +348,7 @@ class MarconeClient:
 
         return self._clean_price(text)
 
-    def get_product_detail(
-        self, part_number: str, make: str = ""
-    ) -> PartPricing | None:
+    def get_product_detail(self, part_number: str, make: str = "") -> PartPricing | None:
         """Fetch detail page for part and make to retrieve retail price and stock status."""
         clean_part = part_number.strip()
         if not clean_part:
@@ -432,9 +410,7 @@ class MarconeClient:
 
         makes = self.get_part_makes(clean_part)
         primary_make = makes[0] if makes else ""
-        customer_cost = (
-            self.get_customer_price(clean_part, primary_make) if primary_make else None
-        )
+        customer_cost = self.get_customer_price(clean_part, primary_make) if primary_make else None
 
         detail = self.get_product_detail(clean_part, primary_make)
         if detail is None and customer_cost is None:
@@ -456,9 +432,7 @@ class MarconeClient:
             description = None
 
         if customer_cost is None and list_price is None:
-            raise PartNotFoundError(
-                f"Part '{clean_part}' not found or pricing unavailable"
-            )
+            raise PartNotFoundError(f"Part '{clean_part}' not found or pricing unavailable")
 
         return PartPricing(
             part_number=clean_part,
@@ -554,19 +528,15 @@ class MarconeClient:
             raw_make = img.get("make", "")
             item_make = raw_make[0] if isinstance(raw_make, list) else str(raw_make)
 
-        if not item_part or item_part.strip().upper() == part_number.strip().upper():
-            price_el = item.select_one("span.spanPrice, .price")
-            cost = self._clean_price(price_el.get_text()) if price_el else None
-            return PartPricing(
-                part_number=part_number,
-                make=item_make,
-                customer_cost=cost,
-            )
-        return None
+        if item_part and item_part.strip().upper() != part_number.strip().upper():
+            return None
+        price_el = item.select_one("span.spanPrice, .price")
+        cost = self._clean_price(price_el.get_text()) if price_el else None
+        if cost is None:
+            return None
+        return PartPricing(part_number=part_number, make=item_make, customer_cost=cost)
 
-    def _parse_listing_soup(
-        self, soup: BeautifulSoup, part_number: str
-    ) -> PartPricing | None:
+    def _parse_listing_soup(self, soup: BeautifulSoup, part_number: str) -> PartPricing | None:
         """Extract prices from a search result item listing."""
         items = soup.select(".partResult_items, .search_item, .RepPartlist")
         for item in items:

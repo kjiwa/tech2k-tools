@@ -17,6 +17,17 @@ from inventory_updater.cache import PriceCache
 logger = logging.getLogger(__name__)
 
 
+class MissingColumnsError(ValueError):
+    """Raised when required columns are not recognized in the header row."""
+
+    def __init__(self, missing: list[str]) -> None:
+        self.missing = missing
+        super().__init__(f"Missing required columns: {', '.join(missing)}")
+
+
+COLUMN_LABELS = {"part": "Part Number", "cost": "Cost", "price": "Price"}
+
+
 @dataclass
 class UpdateStats:
     total_rows: int = 0
@@ -58,6 +69,15 @@ def _extract_unique_suppliers(sheet: Any, col_idx: int) -> list[str]:
     return sorted(seen, key=str.casefold)
 
 
+def _missing_columns(col_map: dict[str, int], field: str) -> list[str]:
+    required = ["part"]
+    if field in ("cost", "both"):
+        required.append("cost")
+    if field in ("price", "both"):
+        required.append("price")
+    return [COLUMN_LABELS[key] for key in required if key not in col_map]
+
+
 def get_file_info(file_path: str | Path) -> dict[str, Any]:
     """Inspect an Excel inventory file without modifying it."""
     path = Path(file_path)
@@ -71,7 +91,6 @@ def get_file_info(file_path: str | Path) -> dict[str, Any]:
 
     first_row = next(sheet.iter_rows(values_only=True), None)
     headers = list(first_row) if first_row else []
-    detected = InventoryUpdater._detect_columns(headers, apply_defaults=False)
     col_map = InventoryUpdater._detect_columns(headers)
 
     row_count = sheet.max_row - 1 if sheet.max_row and sheet.max_row > 1 else 0
@@ -86,10 +105,11 @@ def get_file_info(file_path: str | Path) -> dict[str, Any]:
         "sheet_name": sheet.title,
         "row_count": max(0, row_count),
         "headers": [str(h) for h in headers if h is not None],
-        "has_part_col": "part" in detected,
-        "has_cost_col": "cost" in detected or "avg_cost" in detected,
-        "has_price_col": "price" in detected,
-        "has_supplier_col": "supplier" in detected,
+        "has_part_col": "part" in col_map,
+        "has_cost_col": "cost" in col_map,
+        "has_price_col": "price" in col_map,
+        "has_supplier_col": "supplier" in col_map,
+        "missing_columns": _missing_columns(col_map, "both"),
         "suppliers": unique_suppliers,
     }
 
@@ -152,8 +172,7 @@ class InventoryUpdater:
         rows: list[int],
     ) -> dict[str, tuple[PartPricing | None, Exception | None]]:
         candidate_parts = [
-            str(sheet.cell(row=r, column=col_map["part"]).value or "").strip()
-            for r in rows
+            str(sheet.cell(row=r, column=col_map["part"]).value or "").strip() for r in rows
         ]
         cached_map, missing_set = self.cache.get_many(
             candidate_parts,
@@ -188,21 +207,15 @@ class InventoryUpdater:
                 continue
 
             s_cell = (
-                sheet.cell(row=r_idx, column=col_map["supplier"])
-                if "supplier" in col_map
-                else None
+                sheet.cell(row=r_idx, column=col_map["supplier"]) if "supplier" in col_map else None
             )
             c_supplier = str(s_cell.value or "").strip() if s_cell else ""
-            if not self._matches_supplier_filter(
-                c_supplier, supplier_filter, allow_blank_supplier
-            ):
+            if not self._matches_supplier_filter(c_supplier, supplier_filter, allow_blank_supplier):
                 continue
 
             if only_missing:
                 c_cell = (
-                    sheet.cell(row=r_idx, column=col_map["cost"])
-                    if "cost" in col_map
-                    else None
+                    sheet.cell(row=r_idx, column=col_map["cost"]) if "cost" in col_map else None
                 )
                 ac_cell = (
                     sheet.cell(row=r_idx, column=col_map["avg_cost"])
@@ -210,9 +223,7 @@ class InventoryUpdater:
                     else None
                 )
                 pr_cell = (
-                    sheet.cell(row=r_idx, column=col_map["price"])
-                    if "price" in col_map
-                    else None
+                    sheet.cell(row=r_idx, column=col_map["price"]) if "price" in col_map else None
                 )
                 if self._check_already_populated(field, c_cell, ac_cell, pr_cell):
                     continue
@@ -281,9 +292,7 @@ class InventoryUpdater:
         self,
         clean_part: str,
         resolved_pricing: dict[str, tuple[PartPricing | None, Exception | None]],
-        futures: dict[
-            str, concurrent.futures.Future[tuple[PartPricing | None, Exception | None]]
-        ],
+        futures: dict[str, concurrent.futures.Future[tuple[PartPricing | None, Exception | None]]],
         uncached_index_map: dict[str, int],
         ensure_submitted: Callable[[int], None],
         lookahead_window: int,
@@ -342,6 +351,9 @@ class InventoryUpdater:
 
         headers = [cell.value for cell in sheet[1]]
         col_map = self._detect_columns(headers)
+        missing = _missing_columns(col_map, field)
+        if missing:
+            raise MissingColumnsError(missing)
 
         stats = UpdateStats()
         rows_to_process = list(range(2, sheet.max_row + 1))
@@ -361,18 +373,14 @@ class InventoryUpdater:
 
         pool_size = min(concurrency, max(1, len(uncached_parts)))
         executor = (
-            concurrent.futures.ThreadPoolExecutor(max_workers=pool_size)
-            if uncached_parts
-            else None
+            concurrent.futures.ThreadPoolExecutor(max_workers=pool_size) if uncached_parts else None
         )
         futures: dict[
             str, concurrent.futures.Future[tuple[PartPricing | None, Exception | None]]
         ] = {}
         uncached_index_map = {p: i for i, p in enumerate(uncached_parts)}
         next_submit_idx = 0
-        lookahead_window = (
-            max(concurrency * 3, 10) if lookahead is None else max(1, lookahead)
-        )
+        lookahead_window = max(concurrency * 3, 10) if lookahead is None else max(1, lookahead)
 
         def ensure_submitted(target_idx: int) -> None:
             nonlocal next_submit_idx
@@ -387,84 +395,173 @@ class InventoryUpdater:
                     futures[p] = executor.submit(self._fetch_part_safe, p, cancel_check)
                 next_submit_idx += 1
 
-        processed_count = 0
-        ensure_submitted(lookahead_window)
+        try:
+            ensure_submitted(lookahead_window)
 
-        for row_idx in rows_to_process:
-            if cancel_check and cancel_check():
-                stats.cancelled = True
-                break
+            for position, row_idx in enumerate(rows_to_process, start=1):
+                if cancel_check and cancel_check():
+                    stats.cancelled = True
+                    break
 
-            if limit is not None and stats.updated >= limit:
-                break
+                if limit is not None and stats.updated >= limit:
+                    break
 
-            part_cell = sheet.cell(row=row_idx, column=col_map["part"])
-            part_no = str(part_cell.value or "").strip()
-            if not part_no:
-                stats.skipped += 1
-                if row_cb:
-                    row_cb(
-                        RowUpdateResult(
-                            row_idx=row_idx,
-                            part_no="",
-                            status="skipped",
-                            message="Blank part number",
+                part_cell = sheet.cell(row=row_idx, column=col_map["part"])
+                part_no = str(part_cell.value or "").strip()
+                if progress_cb:
+                    progress_cb(position, stats.total_rows, part_no)
+                if not part_no:
+                    stats.skipped += 1
+                    if row_cb:
+                        row_cb(
+                            RowUpdateResult(
+                                row_idx=row_idx,
+                                part_no="",
+                                status="skipped",
+                                message="Blank part number",
+                            )
                         )
-                    )
-                continue
+                    continue
 
-            supplier_cell = (
-                sheet.cell(row=row_idx, column=col_map["supplier"])
-                if "supplier" in col_map
-                else None
-            )
-            current_supplier = (
-                str(supplier_cell.value or "").strip() if supplier_cell else ""
-            )
-
-            if not self._matches_supplier_filter(
-                current_supplier, supplier_filter, allow_blank_supplier
-            ):
-                stats.skipped += 1
-                if row_cb:
-                    row_cb(
-                        RowUpdateResult(
-                            row_idx=row_idx,
-                            part_no=part_no,
-                            status="skipped",
-                            message=f"Supplier mismatch: '{current_supplier}'",
-                        )
-                    )
-                continue
-
-            cost_cell = (
-                sheet.cell(row=row_idx, column=col_map["cost"])
-                if "cost" in col_map
-                else None
-            )
-            avg_cost_cell = (
-                sheet.cell(row=row_idx, column=col_map["avg_cost"])
-                if "avg_cost" in col_map
-                else None
-            )
-            price_cell = (
-                sheet.cell(row=row_idx, column=col_map["price"])
-                if "price" in col_map
-                else None
-            )
-
-            orig_cost = _parse_float(
-                cost_cell.value
-                if cost_cell
-                else (avg_cost_cell.value if avg_cost_cell else None)
-            )
-            orig_price = _parse_float(price_cell.value if price_cell else None)
-
-            if only_missing:
-                already_pop_msg = self._check_already_populated(
-                    field, cost_cell, avg_cost_cell, price_cell
+                supplier_cell = (
+                    sheet.cell(row=row_idx, column=col_map["supplier"])
+                    if "supplier" in col_map
+                    else None
                 )
-                if already_pop_msg:
+                current_supplier = str(supplier_cell.value or "").strip() if supplier_cell else ""
+
+                if not self._matches_supplier_filter(
+                    current_supplier, supplier_filter, allow_blank_supplier
+                ):
+                    stats.skipped += 1
+                    if row_cb:
+                        row_cb(
+                            RowUpdateResult(
+                                row_idx=row_idx,
+                                part_no=part_no,
+                                status="skipped",
+                                message=f"Supplier mismatch: '{current_supplier}'",
+                            )
+                        )
+                    continue
+
+                cost_cell = (
+                    sheet.cell(row=row_idx, column=col_map["cost"]) if "cost" in col_map else None
+                )
+                avg_cost_cell = (
+                    sheet.cell(row=row_idx, column=col_map["avg_cost"])
+                    if "avg_cost" in col_map
+                    else None
+                )
+                price_cell = (
+                    sheet.cell(row=row_idx, column=col_map["price"]) if "price" in col_map else None
+                )
+
+                orig_cost = _parse_float(
+                    cost_cell.value
+                    if cost_cell
+                    else (avg_cost_cell.value if avg_cost_cell else None)
+                )
+                orig_price = _parse_float(price_cell.value if price_cell else None)
+
+                if only_missing:
+                    already_pop_msg = self._check_already_populated(
+                        field, cost_cell, avg_cost_cell, price_cell
+                    )
+                    if already_pop_msg:
+                        stats.skipped += 1
+                        if row_cb:
+                            row_cb(
+                                RowUpdateResult(
+                                    row_idx=row_idx,
+                                    part_no=part_no,
+                                    status="skipped",
+                                    old_cost=orig_cost,
+                                    old_price=orig_price,
+                                    message=already_pop_msg,
+                                )
+                            )
+                        continue
+
+                clean_part = part_no.upper()
+                pricing, fetch_exc, was_cancelled = self._await_pricing(
+                    clean_part,
+                    resolved_pricing,
+                    futures,
+                    uncached_index_map,
+                    ensure_submitted,
+                    lookahead_window,
+                    cancel_check,
+                )
+                if was_cancelled or (cancel_check and cancel_check()):
+                    stats.cancelled = True
+                    break
+
+                if fetch_exc is not None:
+                    if isinstance(fetch_exc, MarconeError):
+                        logger.error("Error looking up part %s: %s", part_no, fetch_exc)
+                    else:
+                        logger.error(
+                            "Unexpected error looking up part %s: %s",
+                            part_no,
+                            fetch_exc,
+                        )
+                    stats.errors += 1
+                    if row_cb:
+                        row_cb(
+                            RowUpdateResult(
+                                row_idx=row_idx,
+                                part_no=part_no,
+                                status="error",
+                                old_cost=orig_cost,
+                                old_price=orig_price,
+                                message=str(fetch_exc),
+                            )
+                        )
+                    continue
+
+                if not pricing or not pricing.has_pricing:
+                    logger.warning("Part %s not found in Marcone catalog", part_no)
+                    stats.not_found += 1
+                    if row_cb:
+                        row_cb(
+                            RowUpdateResult(
+                                row_idx=row_idx,
+                                part_no=part_no,
+                                status="not_found",
+                                old_cost=orig_cost,
+                                old_price=orig_price,
+                                message="Not found in Marcone catalog",
+                            )
+                        )
+                    continue
+
+                modified, new_cost, new_price = self._apply_row_pricing(
+                    pricing,
+                    field,
+                    cost_cell,
+                    avg_cost_cell,
+                    price_cell,
+                    supplier_cell,
+                    set_supplier,
+                    orig_cost,
+                    orig_price,
+                )
+                if modified:
+                    stats.updated += 1
+                    if row_cb:
+                        row_cb(
+                            RowUpdateResult(
+                                row_idx=row_idx,
+                                part_no=part_no,
+                                status="updated",
+                                old_cost=orig_cost,
+                                new_cost=new_cost,
+                                old_price=orig_price,
+                                new_price=new_price,
+                            )
+                        )
+                else:
                     stats.skipped += 1
                     if row_cb:
                         row_cb(
@@ -473,114 +570,19 @@ class InventoryUpdater:
                                 part_no=part_no,
                                 status="skipped",
                                 old_cost=orig_cost,
+                                new_cost=orig_cost,
                                 old_price=orig_price,
-                                message=already_pop_msg,
+                                new_price=orig_price,
+                                message="Price unchanged",
                             )
                         )
-                    continue
 
-            processed_count += 1
-            if progress_cb:
-                progress_cb(processed_count, stats.total_rows, part_no)
+        finally:
+            if executor:
+                executor.shutdown(wait=True, cancel_futures=True)
 
-            clean_part = part_no.upper()
-            pricing, fetch_exc, was_cancelled = self._await_pricing(
-                clean_part,
-                resolved_pricing,
-                futures,
-                uncached_index_map,
-                ensure_submitted,
-                lookahead_window,
-                cancel_check,
-            )
-            if was_cancelled or (cancel_check and cancel_check()):
-                stats.cancelled = True
-                break
-
-            if fetch_exc is not None:
-                if isinstance(fetch_exc, MarconeError):
-                    logger.error("Error looking up part %s: %s", part_no, fetch_exc)
-                else:
-                    logger.error(
-                        "Unexpected error looking up part %s: %s",
-                        part_no,
-                        fetch_exc,
-                    )
-                stats.errors += 1
-                if row_cb:
-                    row_cb(
-                        RowUpdateResult(
-                            row_idx=row_idx,
-                            part_no=part_no,
-                            status="error",
-                            old_cost=orig_cost,
-                            old_price=orig_price,
-                            message=str(fetch_exc),
-                        )
-                    )
-                continue
-
-            if not pricing or not pricing.has_pricing:
-                logger.warning("Part %s not found in Marcone catalog", part_no)
-                stats.not_found += 1
-                if row_cb:
-                    row_cb(
-                        RowUpdateResult(
-                            row_idx=row_idx,
-                            part_no=part_no,
-                            status="not_found",
-                            old_cost=orig_cost,
-                            old_price=orig_price,
-                            message="Not found in Marcone catalog",
-                        )
-                    )
-                continue
-
-            modified, new_cost, new_price = self._apply_row_pricing(
-                pricing,
-                field,
-                cost_cell,
-                avg_cost_cell,
-                price_cell,
-                supplier_cell,
-                set_supplier,
-                orig_cost,
-                orig_price,
-            )
-            if modified:
-                stats.updated += 1
-                if row_cb:
-                    row_cb(
-                        RowUpdateResult(
-                            row_idx=row_idx,
-                            part_no=part_no,
-                            status="updated",
-                            old_cost=orig_cost,
-                            new_cost=new_cost,
-                            old_price=orig_price,
-                            new_price=new_price,
-                        )
-                    )
-            else:
-                stats.skipped += 1
-                if row_cb:
-                    row_cb(
-                        RowUpdateResult(
-                            row_idx=row_idx,
-                            part_no=part_no,
-                            status="skipped",
-                            old_cost=orig_cost,
-                            new_cost=orig_cost,
-                            old_price=orig_price,
-                            new_price=orig_price,
-                            message="Price unchanged",
-                        )
-                    )
-
-        if executor:
-            executor.shutdown(wait=False, cancel_futures=True)
-
-        self._save_output_file(wb, target_path, dry_run, stats.updated)
+        if not stats.cancelled:
+            self._save_output_file(wb, target_path, dry_run, stats.updated)
         return stats
 
     def _fetch_part_safe(
@@ -599,16 +601,8 @@ class InventoryUpdater:
             return None, exc
 
     @staticmethod
-    def _detect_columns(
-        headers: list[object], apply_defaults: bool = True
-    ) -> dict[str, int]:
-        """Map header names to 1-based column indices.
-
-        When ``apply_defaults`` is False, only headers actually recognized
-        from ``headers`` are returned, without the positional fallbacks used
-        for processing an inventory file whose headers don't match any known
-        name.
-        """
+    def _detect_columns(headers: list[object]) -> dict[str, int]:
+        """Map recognized header names to 1-based column indices."""
         mapping: dict[str, int] = {}
         for idx, h in enumerate(headers, start=1):
             if not h:
@@ -619,8 +613,6 @@ class InventoryUpdater:
                 or h_str == "part"
             ):
                 mapping.setdefault("part", idx)
-            elif "vendor part" in h_str:
-                mapping.setdefault("vendor_part", idx)
             elif h_str in ("avg. unit cost", "avg unit cost", "average unit cost"):
                 mapping.setdefault("avg_cost", idx)
             elif h_str in ("purchase price", "supplier cost") or h_str == "cost":
@@ -629,16 +621,7 @@ class InventoryUpdater:
                 mapping.setdefault("price", idx)
             elif h_str in ("primary vendor", "supplier name", "supplier", "vendor"):
                 mapping.setdefault("supplier", idx)
-            elif "manufacturer" in h_str or h_str == "make":
-                mapping.setdefault("make", idx)
 
-        if not apply_defaults:
-            return mapping
-
-        mapping.setdefault("part", 1)
         if "cost" not in mapping and "avg_cost" in mapping:
             mapping["cost"] = mapping["avg_cost"]
-        mapping.setdefault("cost", 8)
-        mapping.setdefault("price", 10)
-        mapping.setdefault("supplier", 14)
         return mapping

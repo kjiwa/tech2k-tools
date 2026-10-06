@@ -36,9 +36,9 @@ def test_lookup_part_empty():
 
 def test_login_and_close():
     client = FakeMarconeClient()
-    assert not client._is_logged_in
+    assert not client.is_logged_in
     assert client.login("any_user", "any_pass", "12345") is True
-    assert client._is_logged_in is True
+    assert client.is_logged_in is True
     client.close()
 
 

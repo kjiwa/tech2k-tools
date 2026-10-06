@@ -37,7 +37,11 @@ def _draw_background_squircle(p: QPainter, size: int, scale: float) -> None:
 
 def _draw_inner_card(p: QPainter, scale: float) -> None:
     c_path = QPainterPath()
-    c_path.addRoundedRect(QRectF(150.0 * scale, 160.0 * scale, 724.0 * scale, 704.0 * scale), 50.0 * scale, 50.0 * scale)
+    c_path.addRoundedRect(
+        QRectF(150.0 * scale, 160.0 * scale, 724.0 * scale, 704.0 * scale),
+        50.0 * scale,
+        50.0 * scale,
+    )
     cg = QLinearGradient(0, 160.0 * scale, 0, 864.0 * scale)
     cg.setColorAt(0.0, QColor("#2563eb"))
     cg.setColorAt(1.0, QColor("#1d4ed8"))
@@ -46,20 +50,35 @@ def _draw_inner_card(p: QPainter, scale: float) -> None:
 
 def _draw_spreadsheet(p: QPainter, scale: float) -> None:
     s_path = QPainterPath()
-    s_path.addRoundedRect(QRectF(190.0 * scale, 240.0 * scale, 644.0 * scale, 570.0 * scale), 35.0 * scale, 35.0 * scale)
+    s_path.addRoundedRect(
+        QRectF(190.0 * scale, 240.0 * scale, 644.0 * scale, 570.0 * scale),
+        35.0 * scale,
+        35.0 * scale,
+    )
     p.fillPath(s_path, QBrush(QColor("#ffffff")))
 
     h_path = QPainterPath()
-    h_path.addRoundedRect(QRectF(190.0 * scale, 240.0 * scale, 644.0 * scale, 100.0 * scale), 35.0 * scale, 35.0 * scale)
+    h_path.addRoundedRect(
+        QRectF(190.0 * scale, 240.0 * scale, 644.0 * scale, 100.0 * scale),
+        35.0 * scale,
+        35.0 * scale,
+    )
     p.fillPath(h_path, QBrush(QColor("#0284c7")))
 
     for i, c in enumerate(["#10b981", "#3b82f6", "#f59e0b", "#6366f1"]):
         y = 380.0 * scale + i * 95.0 * scale
         cp = QPainterPath()
-        cp.addRoundedRect(QRectF(230.0 * scale, y, 110.0 * scale, 28.0 * scale), 14.0 * scale, 14.0 * scale)
+        cp.addRoundedRect(
+            QRectF(230.0 * scale, y, 110.0 * scale, 28.0 * scale),
+            14.0 * scale,
+            14.0 * scale,
+        )
         p.fillPath(cp, QBrush(QColor(c)))
         p.setPen(QPen(QColor("#cbd5e1"), 10.0 * scale))
-        p.drawLine(QPointF(370.0 * scale, y + 14.0 * scale), QPointF(770.0 * scale, y + 14.0 * scale))
+        p.drawLine(
+            QPointF(370.0 * scale, y + 14.0 * scale),
+            QPointF(770.0 * scale, y + 14.0 * scale),
+        )
 
 
 def _draw_dollar_badge(p: QPainter, size: int, scale: float) -> None:
@@ -109,13 +128,23 @@ def create_icns(img: QImage, out: Path) -> None:
     d = out.parent / "icon.iconset"
     d.mkdir(parents=True, exist_ok=True)
     for fn, s in [
-        ("icon_16x16.png", 16), ("icon_16x16@2x.png", 32),
-        ("icon_32x32.png", 32), ("icon_32x32@2x.png", 64),
-        ("icon_128x128.png", 128), ("icon_128x128@2x.png", 256),
-        ("icon_256x256.png", 256), ("icon_256x256@2x.png", 512),
-        ("icon_512x512.png", 512), ("icon_512x512@2x.png", 1024),
+        ("icon_16x16.png", 16),
+        ("icon_16x16@2x.png", 32),
+        ("icon_32x32.png", 32),
+        ("icon_32x32@2x.png", 64),
+        ("icon_128x128.png", 128),
+        ("icon_128x128@2x.png", 256),
+        ("icon_256x256.png", 256),
+        ("icon_256x256@2x.png", 512),
+        ("icon_512x512.png", 512),
+        ("icon_512x512@2x.png", 1024),
     ]:
-        img.scaled(s, s, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation).save(str(d / fn), "PNG")
+        img.scaled(
+            s,
+            s,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        ).save(str(d / fn), "PNG")
 
     if platform.system() == "Darwin" and shutil.which("iconutil"):
         subprocess.run(["iconutil", "-c", "icns", str(d), "-o", str(out)], check=True)
@@ -132,12 +161,22 @@ def main() -> int:
 
     master = draw_master_icon(1024)
     master.save(str(pdir / "icon.png"), "PNG")
-    master.scaled(256, 256, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation).save(str(adir / "icon.png"), "PNG")
+    master.scaled(
+        256,
+        256,
+        Qt.AspectRatioMode.KeepAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    ).save(str(adir / "icon.png"), "PNG")
 
     ico_list = []
     for s in [16, 24, 32, 48, 64, 128, 256]:
         tmp = pdir / f"tmp_{s}.png"
-        master.scaled(s, s, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation).save(str(tmp), "PNG")
+        master.scaled(
+            s,
+            s,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        ).save(str(tmp), "PNG")
         ico_list.append((s, tmp.read_bytes()))
         tmp.unlink()
 

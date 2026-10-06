@@ -5,6 +5,8 @@ import os
 import platform
 import sqlite3
 import threading
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -25,10 +27,7 @@ def get_user_cache_dir() -> Path:
 
 
 def get_default_cache_path() -> str:
-    """Return default SQLite cache path, preferring local workspace if present."""
-    local_cache = Path.cwd() / ".cache"
-    if local_cache.exists() or (Path.cwd() / "pyproject.toml").exists():
-        return str(local_cache / "marcone_prices.sqlite")
+    """Return the default SQLite cache path in the user cache directory."""
     return str(get_user_cache_dir() / "marcone_prices.sqlite")
 
 
@@ -37,7 +36,7 @@ def _is_expired(
     max_age_seconds: float | None,
     now: datetime | None = None,
 ) -> bool:
-    """Return True if updated_at is missing, invalid, or older than max_age_seconds."""
+    """Return True if updated_at is unparseable or older than max_age_seconds."""
     if max_age_seconds is None or not updated_at_str:
         return False
     try:
@@ -87,12 +86,15 @@ class PriceCache:
         self._write_lock = threading.Lock()
         self._init_db()
 
-    def _get_connection(self) -> sqlite3.Connection:
+    @contextmanager
+    def _connection(self) -> Iterator[sqlite3.Connection]:
+        """Yield a connection that commits or rolls back, then closes."""
         os.makedirs(os.path.dirname(os.path.abspath(self.db_path)), exist_ok=True)
-        return sqlite3.connect(self.db_path, timeout=30.0)
+        with closing(sqlite3.connect(self.db_path, timeout=30.0)) as conn, conn:
+            yield conn
 
     def _init_db(self) -> None:
-        with self._write_lock, self._get_connection() as conn:
+        with self._write_lock, self._connection() as conn:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(
                 """
@@ -112,12 +114,10 @@ class PriceCache:
             )
             conn.commit()
 
-    def get(
-        self, part_number: str, max_age_seconds: float | None = None
-    ) -> PartPricing | None:
+    def get(self, part_number: str, max_age_seconds: float | None = None) -> PartPricing | None:
         """Retrieve cached pricing if present and not expired."""
         clean_part = part_number.strip().upper()
-        with self._get_connection() as conn:
+        with self._connection() as conn:
             cur = conn.cursor()
             cur.execute(
                 """
@@ -171,9 +171,7 @@ class PriceCache:
         marked not_found within TTL.
         """
         clean_parts = list(
-            dict.fromkeys(
-                p.strip().upper() for p in part_numbers if p and str(p).strip()
-            )
+            dict.fromkeys(p.strip().upper() for p in part_numbers if p and str(p).strip())
         )
         if not clean_parts:
             return {}, set()
@@ -183,7 +181,7 @@ class PriceCache:
         now = datetime.now(timezone.utc)
         step = max(1, chunk_size or self.chunk_size)
 
-        with self._get_connection() as conn:
+        with self._connection() as conn:
             cur = conn.cursor()
             for i in range(0, len(clean_parts), step):
                 chunk = clean_parts[i : i + step]
@@ -236,7 +234,7 @@ class PriceCache:
         now = datetime.now(timezone.utc).isoformat()
         metadata_json = json.dumps(pricing.metadata) if pricing.metadata else ""
 
-        with self._write_lock, self._get_connection() as conn:
+        with self._write_lock, self._connection() as conn:
             conn.execute(
                 """
                 INSERT INTO part_cache (
@@ -273,7 +271,7 @@ class PriceCache:
         """Record that a part was not found to prevent redundant lookups."""
         clean_part = part_number.strip().upper()
         now = datetime.now(timezone.utc).isoformat()
-        with self._write_lock, self._get_connection() as conn:
+        with self._write_lock, self._connection() as conn:
             conn.execute(
                 """
                 INSERT INTO part_cache (part_number, status, updated_at)
@@ -286,12 +284,10 @@ class PriceCache:
             )
             conn.commit()
 
-    def is_known_missing(
-        self, part_number: str, max_age_seconds: float | None = None
-    ) -> bool:
+    def is_known_missing(self, part_number: str, max_age_seconds: float | None = None) -> bool:
         """Check if part was previously marked not found."""
         clean_part = part_number.strip().upper()
-        with self._get_connection() as conn:
+        with self._connection() as conn:
             cur = conn.cursor()
             cur.execute(
                 "SELECT status, updated_at FROM part_cache WHERE part_number = ?",
@@ -303,6 +299,4 @@ class PriceCache:
             return False
 
         status, updated_at_str = row
-        return status == "not_found" and not _is_expired(
-            updated_at_str, max_age_seconds
-        )
+        return status == "not_found" and not _is_expired(updated_at_str, max_age_seconds)

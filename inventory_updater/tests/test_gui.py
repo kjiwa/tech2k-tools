@@ -1,5 +1,5 @@
 import os
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import openpyxl
 import pytest
@@ -90,10 +90,7 @@ def test_main_window_file_selection_and_options(qapp, test_excel_file):
         assert window.selected_file_path == test_excel_file
         assert window.start_btn.isEnabled() is True
         # Check supplier combo population
-        items = [
-            window.supplier_combo.itemText(i)
-            for i in range(window.supplier_combo.count())
-        ]
+        items = [window.supplier_combo.itemText(i) for i in range(window.supplier_combo.count())]
         assert "(All Suppliers - No Filter)" in items
         assert "Marcone" in items
         assert window.supplier_combo.currentText() == "Marcone"
@@ -120,10 +117,7 @@ def test_main_window_supplier_filter_selection(qapp, tmp_path):
         window = MainWindow()
         window.drop_area.set_file(str(multi_vendor_file))
 
-        items = [
-            window.supplier_combo.itemText(i)
-            for i in range(window.supplier_combo.count())
-        ]
+        items = [window.supplier_combo.itemText(i) for i in range(window.supplier_combo.count())]
         assert items == [
             "(All Suppliers - No Filter)",
             "Encompass",
@@ -226,9 +220,7 @@ def test_main_window_concurrency_options(qapp, test_excel_file):
         window._on_start()
 
         assert mock_worker_cls.call_args.kwargs["workers"] == 6
-        assert (
-            pytest.approx(mock_worker_cls.call_args.kwargs["throttle_seconds"]) == 0.45
-        )
+        assert pytest.approx(mock_worker_cls.call_args.kwargs["throttle_seconds"]) == 0.45
         assert mock_worker_cls.call_args.kwargs["cache_chunk_size"] == 250
 
 
@@ -244,6 +236,33 @@ def test_credentials_dialog_save_and_accept(qapp):
 
         mock_save.assert_called_once_with("myuser", "mypass", "12345")
         assert dlg.result() == QDialog.DialogCode.Accepted
+
+
+def test_credentials_dialog_save_keeps_password_whitespace(qapp):
+    with patch("inventory_updater.gui.save_credentials") as mock_save:
+        dlg = CredentialsDialog()
+        dlg.user_input.setText(" myuser ")
+        dlg.pass_input.setText(" my pass ")
+        dlg.acc_input.setText(" 12345 ")
+        dlg.remember_cb.setChecked(True)
+
+        dlg._on_save()
+
+        mock_save.assert_called_once_with("myuser", " my pass ", "12345")
+
+
+def test_credentials_dialog_session_only_empty_account_clears_environ(qapp, monkeypatch):
+    monkeypatch.setenv("MARCONE_ACCOUNT_NUMBER", "old")
+    dlg = CredentialsDialog()
+    dlg.user_input.setText("u")
+    dlg.pass_input.setText(" p ")
+    dlg.acc_input.setText("")
+    dlg.remember_cb.setChecked(False)
+
+    dlg._on_save()
+
+    assert os.environ["MARCONE_PASSWORD"] == " p "
+    assert "MARCONE_ACCOUNT_NUMBER" not in os.environ
 
 
 def test_main_window_open_credentials_updates_chip_and_start_btn(qapp, test_excel_file):
@@ -329,17 +348,13 @@ def test_main_window_layout_constraints_and_no_performance_row(qapp):
     assert not any("Performance" in text for text in labels)
     assert not any("request throttling" in text for text in labels)
 
-    assert (
-        options_group.layout().sizeConstraint() == QLayout.SizeConstraint.SetMinimumSize
-    )
+    assert options_group.layout().sizeConstraint() == QLayout.SizeConstraint.SetMinimumSize
 
     window.resize(window.minimumSize())
     assert options_group.height() >= 150
 
     # Verify row limit helper text is adjacent to "rows"
-    lbl_rows = next(
-        lbl for lbl in options_group.findChildren(QLabel) if lbl.text() == "rows"
-    )
+    lbl_rows = next(lbl for lbl in options_group.findChildren(QLabel) if lbl.text() == "rows")
     lbl_help = next(
         lbl
         for lbl in options_group.findChildren(QLabel)
@@ -460,7 +475,6 @@ def test_main_window_demo_mode_file_selection(qapp, test_excel_file):
         assert window.start_btn.isEnabled() is True
 
 
-
 def test_update_worker_demo_mode(qapp, test_excel_file, tmp_path):
     out_file = tmp_path / "demo_output.xlsx"
     results = []
@@ -503,3 +517,85 @@ def test_main_window_demo_mode_start_worker(qapp, test_excel_file):
         assert window.worker.username == "demo"
         assert window.worker.password == "demo"
 
+
+@pytest.fixture
+def no_cost_excel_file(tmp_path):
+    file_path = tmp_path / "no_cost.xlsx"
+    wb = openpyxl.Workbook()
+    sheet = wb.active
+    sheet.append(["Part No", "Price", "Vendor"])
+    sheet.append(["WPW10321304", 20.0, "Marcone"])
+    wb.save(file_path)
+    return file_path
+
+
+def test_file_drop_area_warns_about_missing_columns(qapp, no_cost_excel_file):
+    drop_area = FileDropArea()
+    drop_area.set_file(str(no_cost_excel_file))
+
+    assert drop_area.file_info["missing_columns"] == ["Cost"]
+    assert "Cost" in drop_area.col_badge.text()
+    assert drop_area.col_badge.objectName() == "fileBadgeColWarn"
+
+
+def test_main_window_start_disabled_when_columns_missing(qapp, no_cost_excel_file):
+    with patch(
+        "inventory_updater.gui.load_credentials",
+        return_value={"username": "testuser", "password": "pw"},
+    ):
+        window = MainWindow()
+        window.drop_area.set_file(str(no_cost_excel_file))
+        assert window.start_btn.isEnabled() is False
+        assert "Cost" in window.status_lbl.text()
+
+        with patch.object(window, "_open_credentials") as open_creds:
+            window._on_file_selected(str(no_cost_excel_file))
+        open_creds.assert_not_called()
+
+
+def test_main_window_credentials_do_not_enable_start_when_columns_missing(qapp, no_cost_excel_file):
+    with patch(
+        "inventory_updater.gui.load_credentials",
+        return_value={"username": "testuser", "password": "pw"},
+    ):
+        window = MainWindow()
+        window.drop_area.set_file(str(no_cost_excel_file))
+        with patch("inventory_updater.gui.CredentialsDialog") as dlg_cls:
+            dlg_cls.return_value.exec.return_value = QDialog.DialogCode.Accepted
+            window._open_credentials()
+        assert window.start_btn.isEnabled() is False
+
+
+def test_main_window_cancelled_message_says_no_changes_written(qapp):
+    window = MainWindow()
+    window._on_worker_finished(UpdateStats(total_rows=10, updated=3, cancelled=True))
+
+    assert "No changes were written" in window.status_lbl.text()
+    assert window.success_frame.isHidden()
+
+
+def test_main_window_close_cancels_and_waits_for_running_worker(qapp):
+    window = MainWindow()
+    calls = []
+    worker = MagicMock()
+    worker.isRunning.return_value = True
+    worker.cancel.side_effect = lambda: calls.append("cancel")
+    worker.wait.side_effect = lambda *a: calls.append("wait")
+    window.worker = worker
+
+    assert window.close()
+
+    assert calls == ["cancel", "wait"]
+
+
+def test_main_window_close_without_worker(qapp):
+    window = MainWindow()
+    assert window.close()
+
+
+def test_main_window_grab_renders(qapp, tmp_path):
+    window = MainWindow()
+    window.show()
+    out = tmp_path / "main_window.png"
+    assert window.grab().save(str(out))
+    assert out.stat().st_size > 0
