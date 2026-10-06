@@ -2,16 +2,15 @@ from __future__ import annotations
 
 import argparse
 import logging
-import os
 import sys
 from pathlib import Path
 
-from dotenv import load_dotenv
 from marcone.client import MarconeClient
 from marcone.exceptions import AuthenticationError, MarconeError
 
-from inventory_updater.cache import PriceCache
-from inventory_updater.updater import InventoryUpdater, UpdateStats
+from inventory_updater.cache import PriceCache, get_default_cache_path
+from inventory_updater.credentials import load_credentials
+from inventory_updater.updater import InventoryUpdater, MissingColumnsError, UpdateStats
 
 
 def setup_logging(verbose: bool) -> None:
@@ -112,8 +111,8 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--cache-file",
-        default=".cache/marcone_prices.sqlite",
-        help="SQLite cache file path (default: .cache/marcone_prices.sqlite)",
+        default=None,
+        help="SQLite cache file path (default: user cache directory)",
     )
     parser.add_argument(
         "--cache-ttl-days",
@@ -145,22 +144,14 @@ def parse_args(args: list[str] | None = None) -> argparse.Namespace:
 def _resolve_input_path(raw_path: str) -> Path | None:
     input_path = Path(raw_path)
     if not input_path.exists():
-        if (
-            input_path.suffix.lower() == ".xslx"
-            and input_path.with_suffix(".xlsx").exists()
-        ):
+        if input_path.suffix.lower() == ".xslx" and input_path.with_suffix(".xlsx").exists():
             input_path = input_path.with_suffix(".xlsx")
-        elif (
-            input_path.suffix.lower() == ".xlsx"
-            and input_path.with_suffix(".xslx").exists()
-        ):
+        elif input_path.suffix.lower() == ".xlsx" and input_path.with_suffix(".xslx").exists():
             input_path = input_path.with_suffix(".xslx")
     return input_path if input_path.exists() else None
 
 
-def _resolve_output_path(
-    input_path: Path, output_arg: str | None, in_place: bool
-) -> Path:
+def _resolve_output_path(input_path: Path, output_arg: str | None, in_place: bool) -> Path:
     if in_place:
         return input_path
     if output_arg:
@@ -171,10 +162,12 @@ def _resolve_output_path(
 def _resolve_credentials(
     args: argparse.Namespace,
 ) -> tuple[str | None, str | None, str | None]:
-    username = args.username or os.getenv("MARCONE_USERNAME")
-    password = args.password or os.getenv("MARCONE_PASSWORD")
-    account_number = args.account_number or os.getenv("MARCONE_ACCOUNT_NUMBER")
-    return username, password, account_number
+    creds = load_credentials()
+    return (
+        args.username or creds["username"],
+        args.password or creds["password"],
+        args.account_number or creds["account_number"] or None,
+    )
 
 
 def _create_authenticated_client(
@@ -186,9 +179,7 @@ def _create_authenticated_client(
     client = MarconeClient(throttle_seconds=throttle_seconds)
     try:
         print(f"Logging in to Marcone as {username}...")
-        client.login(
-            username=username, password=password, customer_number=account_number
-        )
+        client.login(username=username, password=password, customer_number=account_number)
         return client, 0
     except AuthenticationError as exc:
         sys.stderr.write(f"Authentication failed: {exc}\n")
@@ -210,7 +201,6 @@ def _print_summary(stats: UpdateStats, output_path: Path, dry_run: bool) -> None
 
 
 def main(argv: list[str] | None = None) -> int:
-    load_dotenv()
     args = parse_args(argv)
     setup_logging(args.verbose)
 
@@ -235,7 +225,9 @@ def main(argv: list[str] | None = None) -> int:
     if client is None:
         return exit_code
 
-    cache = PriceCache(db_path=args.cache_file, chunk_size=args.cache_chunk_size)
+    cache = PriceCache(
+        db_path=args.cache_file or get_default_cache_path(), chunk_size=args.cache_chunk_size
+    )
     updater = InventoryUpdater(
         client=client,
         cache=cache,
@@ -246,7 +238,7 @@ def main(argv: list[str] | None = None) -> int:
 
     def progress_callback(current: int, total: int, part_no: str) -> None:
         if args.verbose or current % 25 == 0 or current == 1:
-            print(f"[{current}/{total}] Looking up part {part_no}...")
+            print(f"[{current}/{total}] Checking part {part_no}...")
 
     print(f"Processing '{input_path}'...")
     if args.dry_run:
@@ -267,6 +259,9 @@ def main(argv: list[str] | None = None) -> int:
             workers=args.workers,
             lookahead=args.lookahead,
         )
+    except MissingColumnsError as exc:
+        sys.stderr.write(f"Error: {exc}\n")
+        return 1
     finally:
         client.close()
 

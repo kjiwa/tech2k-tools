@@ -1,9 +1,13 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import openpyxl
 import pytest
 from inventory_updater.cache import PriceCache
-from inventory_updater.updater import InventoryUpdater
+from inventory_updater.updater import (
+    InventoryUpdater,
+    MissingColumnsError,
+    get_file_info,
+)
 from marcone.client import MarconeClient
 from marcone.exceptions import PartNotFoundError
 from marcone.models import PartPricing
@@ -101,13 +105,9 @@ def test_updater_both_fields(tmp_path, sample_excel):
 
     def fake_lookup(part_no):
         if part_no == "WPW10321304":
-            return PartPricing(
-                part_number=part_no, customer_cost=15.25, list_price=27.50
-            )
+            return PartPricing(part_number=part_no, customer_cost=15.25, list_price=27.50)
         elif part_no == "240323002":
-            return PartPricing(
-                part_number=part_no, customer_cost=18.45, list_price=30.00
-            )
+            return PartPricing(part_number=part_no, customer_cost=18.45, list_price=30.00)
         raise PartNotFoundError(part_no)
 
     mock_client.lookup_part.side_effect = fake_lookup
@@ -116,9 +116,7 @@ def test_updater_both_fields(tmp_path, sample_excel):
     updater = InventoryUpdater(client=mock_client, cache=cache)
 
     output_path = tmp_path / "InventoryItems_updated.xlsx"
-    stats = updater.update_file(
-        input_file=sample_excel, output_file=output_path, field="both"
-    )
+    stats = updater.update_file(input_file=sample_excel, output_file=output_path, field="both")
 
     assert stats.total_rows == 3
     assert stats.updated == 2
@@ -146,9 +144,7 @@ def test_updater_cost_only(tmp_path, sample_excel):
     updater = InventoryUpdater(client=mock_client, cache=cache)
 
     output_path = tmp_path / "out.xlsx"
-    updater.update_file(
-        input_file=sample_excel, output_file=output_path, field="cost", limit=1
-    )
+    updater.update_file(input_file=sample_excel, output_file=output_path, field="cost", limit=1)
 
     updated_wb = openpyxl.load_workbook(output_path)
     sheet = updated_wb.active
@@ -194,13 +190,9 @@ def test_updater_supplier_filter_allows_blank_and_skips_others(tmp_path):
 
     def fake_lookup(part_no):
         if part_no == "WPW10321304":
-            return PartPricing(
-                part_number=part_no, customer_cost=15.25, list_price=27.50
-            )
+            return PartPricing(part_number=part_no, customer_cost=15.25, list_price=27.50)
         elif part_no == "240323002":
-            return PartPricing(
-                part_number=part_no, customer_cost=18.45, list_price=30.00
-            )
+            return PartPricing(part_number=part_no, customer_cost=18.45, list_price=30.00)
         raise PartNotFoundError(part_no)
 
     mock_client.lookup_part.side_effect = fake_lookup
@@ -267,8 +259,7 @@ def test_updater_unexpected_error_logged_and_counted(tmp_path, caplog):
     assert stats.errors == 1
     assert stats.updated == 0
     assert (
-        "Unexpected error looking up part ERROR_PART_XYZ: Database disk corruption"
-        in caplog.text
+        "Unexpected error looking up part ERROR_PART_XYZ: Database disk corruption" in caplog.text
     )
 
 
@@ -434,13 +425,9 @@ def test_updater_service_fusion_format(tmp_path, service_fusion_excel):
 
     def fake_lookup(part_no):
         if part_no == "WPW10321304":
-            return PartPricing(
-                part_number=part_no, customer_cost=15.25, list_price=27.50
-            )
+            return PartPricing(part_number=part_no, customer_cost=15.25, list_price=27.50)
         elif part_no == "240323002":
-            return PartPricing(
-                part_number=part_no, customer_cost=18.45, list_price=30.00
-            )
+            return PartPricing(part_number=part_no, customer_cost=18.45, list_price=30.00)
         raise PartNotFoundError(part_no)
 
     mock_client.lookup_part.side_effect = fake_lookup
@@ -512,9 +499,7 @@ def test_updater_row_callback_and_cancellation(tmp_path, sample_excel):
 
     def fake_lookup(part_no):
         if part_no == "WPW10321304":
-            return PartPricing(
-                part_number=part_no, customer_cost=15.25, list_price=27.50
-            )
+            return PartPricing(part_number=part_no, customer_cost=15.25, list_price=27.50)
         return PartPricing(part_number=part_no, customer_cost=18.45, list_price=30.00)
 
     mock_client.lookup_part.side_effect = fake_lookup
@@ -597,3 +582,150 @@ def test_updater_cache_batching_avoids_lookups(tmp_path):
     assert stats.total_rows == 2
     assert stats.updated == 2
     assert mock_client.lookup_part.call_count == 0
+
+
+def _write_workbook(path, rows):
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    for row in rows:
+        ws.append(row)
+    wb.save(path)
+    return path
+
+
+def _updater(tmp_path, lookup=None):
+    mock_client = MagicMock(spec=MarconeClient)
+    mock_client.lookup_part.side_effect = lookup or (
+        lambda p: PartPricing(part_number=p, customer_cost=1.0, list_price=2.0)
+    )
+    cache = PriceCache(db_path=str(tmp_path / "cache.sqlite"))
+    return mock_client, InventoryUpdater(client=mock_client, cache=cache)
+
+
+@pytest.mark.parametrize(
+    "rows",
+    [
+        [["WPW10321304", 1, 2, 3], ["240323002", 4, 5, 6]],
+        [["Foo", "Bar", "Baz"], ["WPW10321304", 1.0, 2.0]],
+    ],
+    ids=["headerless", "unrecognized-headers"],
+)
+def test_update_file_refuses_unrecognized_headers(tmp_path, rows):
+    path = _write_workbook(tmp_path / "in.xlsx", rows)
+    before = path.read_bytes()
+    mock_client, updater = _updater(tmp_path)
+
+    with pytest.raises(MissingColumnsError) as exc_info:
+        updater.update_file(input_file=path)
+
+    assert "Part Number" in str(exc_info.value)
+    assert "Cost" in str(exc_info.value)
+    assert "Price" in str(exc_info.value)
+    assert path.read_bytes() == before
+    mock_client.lookup_part.assert_not_called()
+
+
+@pytest.mark.parametrize(
+    ("headers", "field", "missing", "present"),
+    [
+        (["Part Number", "Unit Price"], "both", ["Cost"], ["Price", "Part Number"]),
+        (["Part Number", "Unit Price"], "cost", ["Cost"], ["Price"]),
+        (["Part Number", "Cost"], "both", ["Price"], ["Cost"]),
+        (["Part Number", "Cost"], "price", ["Price"], ["Cost"]),
+        (["Cost", "Unit Price"], "price", ["Part Number"], ["Price", "Cost"]),
+    ],
+)
+def test_update_file_missing_columns_named_per_field(tmp_path, headers, field, missing, present):
+    path = _write_workbook(tmp_path / "in.xlsx", [headers, ["WPW10321304", 1.0]])
+    _, updater = _updater(tmp_path)
+
+    with pytest.raises(MissingColumnsError) as exc_info:
+        updater.update_file(input_file=path, field=field)
+
+    message = str(exc_info.value)
+    assert all(name in message for name in missing)
+    assert not any(name in message for name in present)
+
+
+def test_update_file_price_only_does_not_require_cost(tmp_path):
+    path = _write_workbook(
+        tmp_path / "in.xlsx", [["Part Number", "Unit Price"], ["WPW10321304", 1.0]]
+    )
+    _, updater = _updater(tmp_path)
+
+    stats = updater.update_file(input_file=path, field="price", supplier_filter=None)
+
+    assert stats.updated == 1
+
+
+def test_get_file_info_reports_missing_columns(tmp_path):
+    path = _write_workbook(
+        tmp_path / "in.xlsx", [["Part Number", "Unit Price"], ["WPW10321304", 1.0]]
+    )
+    assert get_file_info(path)["missing_columns"] == ["Cost"]
+
+
+def test_cancelled_in_place_run_writes_nothing(tmp_path, sample_excel):
+    before = sample_excel.read_bytes()
+    _, updater = _updater(tmp_path)
+    row_results = []
+
+    stats = updater.update_file(
+        input_file=sample_excel,
+        row_cb=row_results.append,
+        cancel_check=lambda: len(row_results) >= 1,
+    )
+
+    assert stats.cancelled is True
+    assert stats.updated == 1
+    assert sample_excel.read_bytes() == before
+
+
+def test_cancelled_run_does_not_write_output_file(tmp_path, sample_excel):
+    out = tmp_path / "out.xlsx"
+    _, updater = _updater(tmp_path)
+    row_results = []
+
+    updater.update_file(
+        input_file=sample_excel,
+        output_file=out,
+        row_cb=row_results.append,
+        cancel_check=lambda: len(row_results) >= 1,
+    )
+
+    assert not out.exists()
+
+
+def test_progress_counts_skipped_rows_and_reaches_total(tmp_path):
+    path = _write_workbook(
+        tmp_path / "in.xlsx",
+        [
+            ["Part Number", "Unit Price", "Avg. Unit Cost", "Primary Vendor"],
+            ["A1", 1.0, 1.0, "Other"],
+            ["", 1.0, 1.0, "Marcone"],
+            ["B2", 1.0, 1.0, "Other"],
+            ["C3", 0.0, 0.0, "Marcone"],
+        ],
+    )
+    _, updater = _updater(tmp_path)
+    progress = []
+
+    stats = updater.update_file(
+        input_file=path,
+        allow_blank_supplier=False,
+        progress_cb=lambda cur, tot, part: progress.append((cur, tot)),
+    )
+
+    assert stats.total_rows == 4
+    assert progress == [(1, 4), (2, 4), (3, 4), (4, 4)]
+
+
+def test_executor_shut_down_with_wait_and_cancel_futures(tmp_path, sample_excel):
+    _, updater = _updater(tmp_path)
+    with patch("inventory_updater.updater.concurrent.futures.ThreadPoolExecutor") as pool_cls:
+        pool = pool_cls.return_value
+        pool.submit.side_effect = RuntimeError("boom")
+        with pytest.raises(RuntimeError, match="boom"):
+            updater.update_file(input_file=sample_excel)
+
+    pool.shutdown.assert_called_once_with(wait=True, cancel_futures=True)

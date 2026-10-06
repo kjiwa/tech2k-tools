@@ -457,6 +457,3 @@ QCheckBox::indicator, QRadioButton::indicator {{
     color: {t["success_text"]};
 }}
 """
-
-
-MAIN_STYLESHEET = get_stylesheet(dark=False)

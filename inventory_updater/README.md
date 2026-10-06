@@ -26,7 +26,7 @@ Set:
 - `MARCONE_PASSWORD`: Portal password.
 - `MARCONE_ACCOUNT_NUMBER`: Customer account number (optional; required if login requires sub-account selection).
 
-Credentials resolve in this order: command line flags, active environment variables, `.env` in the current working directory, `.env` in parent directories, or platform user configuration:
+Credentials resolve per key in this order: command line flags, environment variables, `.env` in the current working directory, then the `.env` in the platform user configuration directory. The GUI saves to the user configuration file, never the working directory:
 - macOS: `~/Library/Application Support/tech2k-tools/.env`
 - Linux: `~/.config/tech2k-tools/.env`
 - Windows: `%APPDATA%\tech2k-tools\.env`
@@ -65,7 +65,6 @@ uv run python scripts/generate_sample_xlsx.py
 
 - Drag-and-drop spreadsheet loading or system file picker.
 - Automatic column detection for Part Number, Cost, Price, and Supplier headers.
-- Update scope selection: Cost and List Price, Customer Cost Only, or List Price Only.
 - Supplier filtering by substring match, plus toggle for blank supplier values.
 - Real-time concurrency, request throttling, and SQLite batch query controls.
 - Dry run simulation mode and row processing limits.
@@ -95,12 +94,12 @@ Default behavior reads `Service Fusion Inventory.xlsx` from the current director
 | `--set-supplier TEXT` | Overwrite supplier column with this text on updated rows | None |
 | `--only-missing` | Only look up rows where cost or price is blank or zero | `false` |
 | `--dry-run` | Query prices and report statistics without writing files | `false` |
-| `--limit N` | Process at most N matching rows | None |
+| `--limit N` | Stop after N rows have been updated | None |
 | `--workers, -w N` | Concurrent lookup threads | `3` |
 | `--throttle, --throttle-seconds SEC` | Minimum delay between HTTP requests across threads | `0.2` |
 | `--cache-chunk-size, --batch-size N` | Item batch size for SQLite cache lookups | `500` |
 | `--lookahead N` | Worker pipeline submission lookahead window | `max(workers * 3, 10)` |
-| `--cache-file PATH` | SQLite database file for price cache | `.cache/marcone_prices.sqlite` |
+| `--cache-file PATH` | SQLite database file for price cache | user cache directory (see Cache) |
 | `--cache-ttl-days DAYS` | Cache entry lifetime in days | `7.0` |
 | `--username USER` | Marcone username override | `MARCONE_USERNAME` |
 | `--password PASS` | Marcone password override | `MARCONE_PASSWORD` |
@@ -156,20 +155,20 @@ uv run inventory-updater --set-supplier Marcone -o output.xlsx
 
 The tool scans row 1 headers (case-insensitive) to identify column mappings:
 
-| Role | Matching Header Names | Fallback Column |
-| --- | --- | --- |
-| Part Number | `part no`, `part no.`, `part #`, `partnumber`, `part number`, `part` | 1 |
-| Vendor Part Number | `vendor part` | None |
-| Cost | `avg. unit cost`, `avg unit cost`, `average unit cost`, `purchase price`, `supplier cost`, `cost` | 8 |
-| Price | `unit price`, `price *`, `price` | 10 |
-| Supplier | `primary vendor`, `supplier name`, `supplier`, `vendor` | 14 |
-| Manufacturer | `manufacturer`, `make` | None |
+| Role | Matching Header Names |
+| --- | --- |
+| Part Number | `part no`, `part no.`, `part #`, `partnumber`, `part number`, `part` |
+| Cost | `avg. unit cost`, `avg unit cost`, `average unit cost`, `purchase price`, `supplier cost`, `cost` |
+| Price | `unit price`, `price *`, `price` |
+| Supplier | `primary vendor`, `supplier name`, `supplier`, `vendor` |
+
+A spreadsheet missing a header required for the chosen update field is refused.
 
 ## Cache
 
 Price lookups are cached in a local SQLite database using write-ahead logging (WAL). The cache records resolved pricing as well as `not_found` responses to avoid repeated network queries.
 
-If running inside a project directory containing `pyproject.toml` or `.cache`, the cache defaults to `.cache/marcone_prices.sqlite`. Otherwise, it uses the platform user cache:
+The cache defaults to the platform user cache directory regardless of the working directory:
 - macOS: `~/Library/Caches/tech2k-tools/marcone_prices.sqlite`
 - Linux: `~/.cache/tech2k-tools/marcone_prices.sqlite`
 - Windows: `%LOCALAPPDATA%\tech2k-tools\marcone_prices.sqlite`

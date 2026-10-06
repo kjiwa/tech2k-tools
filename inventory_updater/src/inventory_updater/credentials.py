@@ -4,7 +4,7 @@ import os
 import platform
 from pathlib import Path
 
-from dotenv import dotenv_values, set_key
+from dotenv import dotenv_values, set_key, unset_key
 from marcone.client import MarconeClient
 from marcone.exceptions import AuthenticationError, MarconeError
 
@@ -22,43 +22,37 @@ def get_user_config_dir() -> Path:
 
 
 def get_default_env_path() -> Path:
-    """Return default .env path in workspace or standard config directory."""
-    cwd_env = Path.cwd() / ".env"
-    if cwd_env.exists():
-        return cwd_env
-    user_env = get_user_config_dir() / ".env"
-    if user_env.exists():
-        return user_env
-    if (Path.cwd() / "pyproject.toml").exists():
-        return cwd_env
-    return user_env
+    """Return the user-config .env path used for saving credentials."""
+    return get_user_config_dir() / ".env"
+
+
+def _read_env_file(path: Path) -> dict[str, str | None]:
+    return dotenv_values(path) if path.exists() else {}
+
+
+def _credential_sources(env_path: Path | None) -> list[Path]:
+    if env_path is not None:
+        return [env_path]
+    return [Path.cwd() / ".env", get_default_env_path()]
+
+
+def _resolve_key(key: str, files: list[dict[str, str | None]]) -> str:
+    value = os.getenv(key)
+    if value:
+        return value
+    for file_vars in files:
+        if file_vars.get(key):
+            return str(file_vars[key])
+    return ""
 
 
 def load_credentials(env_path: Path | None = None) -> dict[str, str]:
-    """Load credentials from environment variables or .env file."""
-    path = env_path or get_default_env_path()
-    file_vars: dict[str, str | None] = {}
-    if path.exists():
-        file_vars = dotenv_values(path)
-    elif env_path is None:
-        user_env = get_user_config_dir() / ".env"
-        if user_env.exists():
-            file_vars = dotenv_values(user_env)
-
-    username = os.getenv("MARCONE_USERNAME") or str(
-        file_vars.get("MARCONE_USERNAME") or ""
-    )
-    password = os.getenv("MARCONE_PASSWORD") or str(
-        file_vars.get("MARCONE_PASSWORD") or ""
-    )
-    account_number = os.getenv("MARCONE_ACCOUNT_NUMBER") or str(
-        file_vars.get("MARCONE_ACCOUNT_NUMBER") or ""
-    )
-
+    """Load credentials: environment variables, then cwd .env, then user .env, per key."""
+    files = [_read_env_file(p) for p in _credential_sources(env_path)]
     return {
-        "username": username.strip(),
-        "password": password.strip(),
-        "account_number": account_number.strip(),
+        "username": _resolve_key("MARCONE_USERNAME", files).strip(),
+        "password": _resolve_key("MARCONE_PASSWORD", files),
+        "account_number": _resolve_key("MARCONE_ACCOUNT_NUMBER", files).strip(),
     }
 
 
@@ -68,7 +62,7 @@ def save_credentials(
     account_number: str = "",
     env_path: Path | None = None,
 ) -> None:
-    """Save credentials to .env file."""
+    """Save credentials to the user-config .env file."""
     path = env_path or get_default_env_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     if not path.exists():
@@ -78,12 +72,15 @@ def save_credentials(
     set_key(str(path), "MARCONE_PASSWORD", password)
     if account_number:
         set_key(str(path), "MARCONE_ACCOUNT_NUMBER", account_number)
+        os.environ["MARCONE_ACCOUNT_NUMBER"] = account_number
+    else:
+        if "MARCONE_ACCOUNT_NUMBER" in dotenv_values(path):
+            unset_key(str(path), "MARCONE_ACCOUNT_NUMBER")
+        os.environ.pop("MARCONE_ACCOUNT_NUMBER", None)
     path.chmod(0o600)
 
     os.environ["MARCONE_USERNAME"] = username
     os.environ["MARCONE_PASSWORD"] = password
-    if account_number:
-        os.environ["MARCONE_ACCOUNT_NUMBER"] = account_number
 
 
 def check_connection(

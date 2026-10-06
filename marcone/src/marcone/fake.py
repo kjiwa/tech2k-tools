@@ -101,14 +101,16 @@ class FakeMarconeClient:
     def __init__(
         self,
         canned_prices: dict[str, PartPricing] | None = None,
-        throttle_seconds: float = 0.0,
     ) -> None:
         self.canned_prices: dict[str, PartPricing] = {}
         source = canned_prices if canned_prices is not None else DEFAULT_CANNED_PRICES
         for k, v in source.items():
             self.canned_prices[k.strip().upper()] = v
-        self.throttle_seconds = throttle_seconds
         self._is_logged_in = False
+
+    @property
+    def is_logged_in(self) -> bool:
+        return self._is_logged_in
 
     def __enter__(self) -> Self:
         return self
@@ -136,9 +138,7 @@ class FakeMarconeClient:
             raise ValueError("Part number cannot be empty")
         pricing = self.canned_prices.get(clean_part.upper())
         if pricing is None:
-            raise PartNotFoundError(
-                f"Part '{clean_part}' not found or pricing unavailable"
-            )
+            raise PartNotFoundError(f"Part '{clean_part}' not found or pricing unavailable")
         return pricing
 
     def get_part_makes(self, part_number: str) -> list[str]:
@@ -148,16 +148,12 @@ class FakeMarconeClient:
             return [pricing.make]
         return []
 
-    def get_customer_price(
-        self, part_number: str, make: str = ""
-    ) -> float | None:
+    def get_customer_price(self, part_number: str, make: str = "") -> float | None:
         clean_part = part_number.strip().upper()
         pricing = self.canned_prices.get(clean_part)
         return pricing.customer_cost if pricing else None
 
-    def get_product_detail(
-        self, part_number: str, make: str = ""
-    ) -> PartPricing | None:
+    def get_product_detail(self, part_number: str, make: str = "") -> PartPricing | None:
         clean_part = part_number.strip().upper()
         return self.canned_prices.get(clean_part)
 

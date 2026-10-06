@@ -66,9 +66,7 @@ def test_login_with_customer_number(client: MarconeClient):
             json={"Result": True, "Message": ""},
         )
 
-        assert (
-            client.login("user@example.com", "secret", customer_number="123456") is True
-        )
+        assert client.login("user@example.com", "secret", customer_number="123456") is True
         assert client.is_logged_in is True
 
 
@@ -306,3 +304,17 @@ def test_empty_input_helpers(client: MarconeClient):
     assert client.get_customer_price("PART", " ") is None
     assert client.get_product_detail("  ") is None
     assert client.search_part("  ") is None
+
+
+def test_search_part_listing_skips_item_without_price(client: MarconeClient):
+    html = (
+        '<div class="search_item"><img class="productimage" part="ABC123" make="WPL"></div>'
+        '<div class="search_item"><img class="productimage" part="ABC123" make="GE">'
+        '<span class="spanPrice">$12.50</span></div>'
+    )
+    with requests_mock.Mocker() as m:
+        m.get("https://test.marcone.com/Home/SearchPartModelList", text=html)
+        pricing = client.search_part("ABC123")
+    assert pricing is not None
+    assert pricing.customer_cost == 12.50
+    assert pricing.make == "GE"

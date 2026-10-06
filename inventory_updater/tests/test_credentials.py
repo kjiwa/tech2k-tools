@@ -1,3 +1,4 @@
+import os
 from unittest.mock import MagicMock, patch
 
 from inventory_updater.credentials import (
@@ -60,23 +61,6 @@ def test_check_connection_failure():
         assert "Login failed: Invalid login" in msg
 
 
-def test_get_default_env_path_ignores_parent_dirs(tmp_path, monkeypatch):
-    from inventory_updater.credentials import get_default_env_path, get_user_config_dir
-
-    parent_env = tmp_path / ".env"
-    parent_env.write_text("MARCONE_USERNAME=parent\n")
-    child_dir = tmp_path / "child"
-    child_dir.mkdir()
-
-    monkeypatch.setattr(
-        "inventory_updater.credentials.Path.cwd", lambda: child_dir
-    )
-
-    env_path = get_default_env_path()
-    assert env_path != parent_env
-    assert env_path == get_user_config_dir() / ".env"
-
-
 def test_save_credentials_chmod_0600_on_existing_file(tmp_path):
     import stat
 
@@ -96,23 +80,73 @@ def test_save_credentials_chmod_0600_on_existing_file(tmp_path):
 
 
 def test_get_user_config_dir(monkeypatch):
-    from pathlib import Path
-
-    from inventory_updater.credentials import get_default_env_path, get_user_config_dir
+    from inventory_updater.credentials import get_user_config_dir
 
     monkeypatch.setattr("platform.system", lambda: "Windows")
     monkeypatch.setenv("APPDATA", "C:\\Users\\Test\\AppData\\Roaming")
-    win_dir = get_user_config_dir()
-    assert "tech2k-tools" in str(win_dir)
+    assert "tech2k-tools" in str(get_user_config_dir())
 
     monkeypatch.setattr("platform.system", lambda: "Darwin")
-    mac_dir = get_user_config_dir()
-    assert "Application Support" in str(mac_dir)
+    assert "Application Support" in str(get_user_config_dir())
 
-    # Test get_default_env_path when cwd has no .env and no pyproject
-    monkeypatch.setattr(
-        "inventory_updater.credentials.Path.cwd",
-        lambda: Path("/nonexistent/dir"),
+
+def _user_env():
+    from inventory_updater.credentials import get_default_env_path
+
+    return get_default_env_path()
+
+
+def test_get_default_env_path_is_user_config_even_in_project_dir(isolated_workspace):
+    from inventory_updater.credentials import get_user_config_dir
+
+    (isolated_workspace / ".env").write_text("MARCONE_USERNAME=cwd\n")
+    assert _user_env() == get_user_config_dir() / ".env"
+
+
+def test_save_credentials_default_path_never_writes_to_cwd(isolated_workspace):
+    before = sorted(p.name for p in isolated_workspace.iterdir())
+    save_credentials("u", "p", "123")
+
+    assert sorted(p.name for p in isolated_workspace.iterdir()) == before
+    assert _user_env().exists()
+    assert load_credentials()["username"] == "u"
+
+
+def test_load_order_env_then_cwd_then_user_per_key(isolated_workspace, monkeypatch):
+    user_env = _user_env()
+    user_env.parent.mkdir(parents=True)
+    user_env.write_text(
+        "MARCONE_USERNAME=user\nMARCONE_PASSWORD=userpw\nMARCONE_ACCOUNT_NUMBER=9\n"
     )
-    env_path = get_default_env_path()
-    assert env_path == mac_dir / ".env"
+    (isolated_workspace / ".env").write_text("MARCONE_USERNAME=cwd\nMARCONE_PASSWORD=cwdpw\n")
+    monkeypatch.setenv("MARCONE_USERNAME", "envuser")
+
+    creds = load_credentials()
+    assert creds == {"username": "envuser", "password": "cwdpw", "account_number": "9"}
+
+
+def test_save_empty_account_number_clears_file_and_environ(monkeypatch):
+    save_credentials("u", "p", "123")
+    assert load_credentials()["account_number"] == "123"
+
+    save_credentials("u", "p", "")
+    assert "MARCONE_ACCOUNT_NUMBER" not in os.environ
+    assert "MARCONE_ACCOUNT_NUMBER" not in _user_env().read_text()
+    assert load_credentials()["account_number"] == ""
+
+
+def test_save_empty_account_number_without_existing_key_is_noop(caplog):
+    save_credentials("u", "p", "")
+    assert "MARCONE_ACCOUNT_NUMBER" not in _user_env().read_text()
+    assert not caplog.records
+
+
+def test_password_whitespace_preserved_username_stripped(monkeypatch):
+    env_file = _user_env()
+    save_credentials("  u  ", "  pw  ", env_path=env_file)
+    monkeypatch.delenv("MARCONE_USERNAME")
+    monkeypatch.delenv("MARCONE_PASSWORD")
+
+    creds = load_credentials()
+    assert creds["username"] == "u"
+    assert creds["password"] == "  pw  "

@@ -13,6 +13,7 @@ from marcone.client import MarconeClient
 from marcone.exceptions import AuthenticationError, MarconeError
 from PySide6.QtCore import QObject, Qt, QThread, QUrl, Signal
 from PySide6.QtGui import (
+    QCloseEvent,
     QColor,
     QDesktopServices,
     QDragEnterEvent,
@@ -124,7 +125,7 @@ class UpdateWorker(QThread):
         if self.demo:
             from marcone.fake import FakeMarconeClient
 
-            client: Any = FakeMarconeClient(throttle_seconds=self.throttle_seconds)
+            client: Any = FakeMarconeClient()
         else:
             client = MarconeClient(throttle_seconds=self.throttle_seconds)
         temp_cache_dir: tempfile.TemporaryDirectory[str] | None = None
@@ -145,9 +146,7 @@ class UpdateWorker(QThread):
                 temp_cache_dir = tempfile.TemporaryDirectory(prefix="marcone_demo_cache_")
                 cache_path = str(Path(temp_cache_dir.name) / "demo_cache.sqlite")
 
-            cache = PriceCache(
-                db_path=cache_path, chunk_size=self.cache_chunk_size
-            )
+            cache = PriceCache(db_path=cache_path, chunk_size=self.cache_chunk_size)
             updater = InventoryUpdater(
                 client=client,
                 cache=cache,
@@ -209,9 +208,7 @@ class ConnectionTestWorker(QThread):
         self.account_number = account_number
 
     def run(self) -> None:
-        success, msg = check_connection(
-            self.username, self.password, self.account_number
-        )
+        success, msg = check_connection(self.username, self.password, self.account_number)
         self.result_signal.emit(success, msg)
 
 
@@ -251,9 +248,7 @@ class CredentialsDialog(QDialog):
         self.user_input.setToolTip(
             "Enter your primary Marcone customer account number or portal login username."
         )
-        user_cap = QLabel(
-            "Your Marcone customer account number or portal login username."
-        )
+        user_cap = QLabel("Your Marcone customer account number or portal login username.")
         user_cap.setProperty("role", "caption")
         user_cap.setWordWrap(True)
         u_box.addWidget(lbl_user)
@@ -348,7 +343,7 @@ class CredentialsDialog(QDialog):
 
     def _on_test_connection(self) -> None:
         user = self.user_input.text().strip()
-        pwd = self.pass_input.text().strip()
+        pwd = self.pass_input.text()
         acc = self.acc_input.text().strip()
 
         if not user or not pwd:
@@ -375,13 +370,11 @@ class CredentialsDialog(QDialog):
 
     def _on_save(self) -> None:
         user = self.user_input.text().strip()
-        pwd = self.pass_input.text().strip()
+        pwd = self.pass_input.text()
         acc = self.acc_input.text().strip()
 
         if not user or not pwd:
-            QMessageBox.warning(
-                self, "Required Fields", "Username and password are required."
-            )
+            QMessageBox.warning(self, "Required Fields", "Username and password are required.")
             return
 
         if self.remember_cb.isChecked():
@@ -391,6 +384,8 @@ class CredentialsDialog(QDialog):
             os.environ["MARCONE_PASSWORD"] = pwd
             if acc:
                 os.environ["MARCONE_ACCOUNT_NUMBER"] = acc
+            else:
+                os.environ.pop("MARCONE_ACCOUNT_NUMBER", None)
 
         self.accept()
 
@@ -610,9 +605,7 @@ class FileDropArea(QFrame):
 
         self.browse_btn = QPushButton("Browse Files...")
         self.browse_btn.setFixedWidth(140)
-        self.browse_btn.setToolTip(
-            "Choose an Excel spreadsheet (.xlsx) from your computer."
-        )
+        self.browse_btn.setToolTip("Choose an Excel spreadsheet (.xlsx) from your computer.")
         self.browse_btn.clicked.connect(self._on_browse)
         empty_layout.addWidget(self.browse_btn, alignment=Qt.AlignmentFlag.AlignCenter)
 
@@ -689,15 +682,12 @@ class FileDropArea(QFrame):
         self.row_badge.style().unpolish(self.row_badge)
         self.row_badge.style().polish(self.row_badge)
 
-        cols_verified = info["has_part_col"] and (
-            info["has_cost_col"] or info["has_price_col"]
-        )
-        if cols_verified:
+        if info["missing_columns"]:
+            self.col_badge.setText(f"⚠ Missing columns: {', '.join(info['missing_columns'])}")
+            self.col_badge.setObjectName("fileBadgeColWarn")
+        else:
             self.col_badge.setText("✓ Columns detected")
             self.col_badge.setObjectName("fileBadgeColOk")
-        else:
-            self.col_badge.setText("⚠ Missing part/price columns")
-            self.col_badge.setObjectName("fileBadgeColWarn")
         self.col_badge.style().unpolish(self.col_badge)
         self.col_badge.style().polish(self.col_badge)
 
@@ -714,9 +704,7 @@ class FileDropArea(QFrame):
             self._update_badges(info)
             self.file_selected.emit(str(path))
         except Exception as exc:  # noqa: BLE001
-            QMessageBox.critical(
-                self, "Invalid File", f"Could not inspect Excel file:\n{exc}"
-            )
+            QMessageBox.critical(self, "Invalid File", f"Could not inspect Excel file:\n{exc}")
 
 
 class MainWindow(QMainWindow):
@@ -800,7 +788,6 @@ class MainWindow(QMainWindow):
         """Find and load application icon across package and bundle paths."""
         candidates = [
             Path(__file__).parent / "assets" / "icon.png",
-            Path(__file__).parent / "assets" / "icon.ico",
         ]
         if getattr(sys, "frozen", False) and hasattr(sys, "_MEIPASS"):
             meipass = Path(sys._MEIPASS)
@@ -864,9 +851,7 @@ class MainWindow(QMainWindow):
         self.options_toggle_btn = QPushButton("▾  Update Options")
         self.options_toggle_btn.setObjectName("optionsToggleBtn")
         self.options_toggle_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.options_toggle_btn.setToolTip(
-            "Click to collapse or expand update options."
-        )
+        self.options_toggle_btn.setToolTip("Click to collapse or expand update options.")
         self.options_toggle_btn.clicked.connect(self._toggle_options)
         header_bar.addWidget(self.options_toggle_btn)
 
@@ -893,9 +878,7 @@ class MainWindow(QMainWindow):
             lbl.setProperty("role", "rowLabel")
             return lbl
 
-        grid.addWidget(
-            make_row_label("Output file:"), 0, 0, Qt.AlignmentFlag.AlignVCenter
-        )
+        grid.addWidget(make_row_label("Output file:"), 0, 0, Qt.AlignmentFlag.AlignVCenter)
         self.radio_new_file = QRadioButton("Save to new file (<name>_updated.xlsx)")
         self.radio_new_file.setChecked(True)
         self.radio_new_file.setToolTip(
@@ -908,9 +891,7 @@ class MainWindow(QMainWindow):
         grid.addWidget(self.radio_new_file, 0, 1, Qt.AlignmentFlag.AlignVCenter)
         grid.addWidget(self.radio_overwrite, 0, 2, Qt.AlignmentFlag.AlignVCenter)
 
-        grid.addWidget(
-            make_row_label("Supplier filter:"), 1, 0, Qt.AlignmentFlag.AlignVCenter
-        )
+        grid.addWidget(make_row_label("Supplier filter:"), 1, 0, Qt.AlignmentFlag.AlignVCenter)
         self.supplier_combo = QComboBox()
         self.supplier_combo.setEditable(True)
         self.supplier_combo.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
@@ -934,9 +915,7 @@ class MainWindow(QMainWindow):
         )
         grid.addWidget(self.cb_blank_supplier, 1, 2, Qt.AlignmentFlag.AlignVCenter)
 
-        grid.addWidget(
-            make_row_label("Row limit:"), 2, 0, Qt.AlignmentFlag.AlignVCenter
-        )
+        grid.addWidget(make_row_label("Row limit:"), 2, 0, Qt.AlignmentFlag.AlignVCenter)
         lim_row = QHBoxLayout()
         lim_row.setSpacing(6)
         self.limit_spin = QSpinBox()
@@ -957,9 +936,7 @@ class MainWindow(QMainWindow):
         lim_row.addStretch(1)
         grid.addLayout(lim_row, 2, 1, 1, 2)
 
-        grid.addWidget(
-            make_row_label("Update rules:"), 3, 0, Qt.AlignmentFlag.AlignVCenter
-        )
+        grid.addWidget(make_row_label("Update rules:"), 3, 0, Qt.AlignmentFlag.AlignVCenter)
         self.cb_missing_only = QCheckBox("Only update missing prices (blank or zero)")
         self.cb_missing_only.setChecked(False)
         self.cb_missing_only.setToolTip(
@@ -982,9 +959,7 @@ class MainWindow(QMainWindow):
         content_layout.addLayout(grid)
         group_layout.addWidget(self.options_content)
 
-        self.supplier_combo.currentTextChanged.connect(
-            lambda _: self._update_options_summary()
-        )
+        self.supplier_combo.currentTextChanged.connect(lambda _: self._update_options_summary())
         self.radio_new_file.toggled.connect(lambda _: self._update_options_summary())
         self.limit_spin.valueChanged.connect(lambda _: self._update_options_summary())
         self.cb_missing_only.toggled.connect(lambda _: self._update_options_summary())
@@ -1012,9 +987,7 @@ class MainWindow(QMainWindow):
         else:
             parts.append(supp)
         parts.append(
-            "Save to new file"
-            if self.radio_new_file.isChecked()
-            else "Overwrite original"
+            "Save to new file" if self.radio_new_file.isChecked() else "Overwrite original"
         )
         limit_val = self.limit_spin.value()
         if limit_val > 0:
@@ -1030,9 +1003,7 @@ class MainWindow(QMainWindow):
         self.start_btn = QPushButton("Start Price Update")
         self.start_btn.setObjectName("primaryBtn")
         self.start_btn.setEnabled(False)
-        self.start_btn.setToolTip(
-            "Start querying Marcone and updating spreadsheet prices."
-        )
+        self.start_btn.setToolTip("Start querying Marcone and updating spreadsheet prices.")
         self.start_btn.clicked.connect(self._on_start)
         act_row.addWidget(self.start_btn)
 
@@ -1075,18 +1046,14 @@ class MainWindow(QMainWindow):
         succ_layout.addWidget(self.open_excel_btn)
 
         self.show_folder_btn = QPushButton("Show in Folder")
-        self.show_folder_btn.setToolTip(
-            "Reveal the updated Excel file in Finder or File Explorer."
-        )
+        self.show_folder_btn.setToolTip("Reveal the updated Excel file in Finder or File Explorer.")
         self.show_folder_btn.clicked.connect(self._show_in_folder)
         succ_layout.addWidget(self.show_folder_btn)
         return self.success_frame
 
     def _build_results_table(self) -> QTableWidget:
         self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(
-            ["Row", "Part Number", "Status", "Cost", "Price"]
-        )
+        self.table.setHorizontalHeaderLabels(["Row", "Part Number", "Status", "Cost", "Price"])
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
@@ -1147,12 +1114,21 @@ class MainWindow(QMainWindow):
         dlg = CredentialsDialog(self)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             self._update_connection_chip()
-            if self.selected_file_path:
+            if self.selected_file_path and not self._missing_columns():
                 self.start_btn.setEnabled(True)
+
+    def _missing_columns(self) -> list[str]:
+        info = self.drop_area.file_info
+        return info["missing_columns"] if info else []
 
     def _on_file_selected(self, file_path: str) -> None:
         self.selected_file_path = Path(file_path)
         self._populate_suppliers()
+        missing = self._missing_columns()
+        if missing:
+            self.start_btn.setEnabled(False)
+            self.status_lbl.setText(f"Cannot update: missing columns: {', '.join(missing)}.")
+            return
         if self.demo:
             self.start_btn.setEnabled(True)
             return
@@ -1279,6 +1255,12 @@ class MainWindow(QMainWindow):
         self.worker.error_signal.connect(self._on_worker_error)
         self.worker.start()
 
+    def closeEvent(self, event: QCloseEvent) -> None:  # noqa: N802
+        if self.worker is not None and self.worker.isRunning():
+            self.worker.cancel()
+            self.worker.wait()
+        super().closeEvent(event)
+
     def _on_cancel(self) -> None:
         if self.worker:
             self.status_lbl.setText("Cancelling update gracefully...")
@@ -1328,7 +1310,7 @@ class MainWindow(QMainWindow):
         self.lbl_errors.setText(f"Errors: {stats.errors:,}")
 
         if stats.cancelled:
-            self.status_lbl.setText("Operation cancelled by user.")
+            self.status_lbl.setText("Operation cancelled by user. No changes were written.")
         else:
             self.status_lbl.setText(
                 f"Finished! {stats.updated:,} prices updated out of {stats.total_rows:,} rows."
@@ -1347,9 +1329,7 @@ class MainWindow(QMainWindow):
 
     def _open_in_excel(self) -> None:
         if self.output_file_path and self.output_file_path.exists():
-            QDesktopServices.openUrl(
-                QUrl.fromLocalFile(str(self.output_file_path.resolve()))
-            )
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(self.output_file_path.resolve())))
 
     def _show_in_folder(self) -> None:
         if not self.output_file_path or not self.output_file_path.exists():
@@ -1365,7 +1345,9 @@ class MainWindow(QMainWindow):
             subprocess.run(["xdg-open", folder], check=False)
 
 
-def parse_gui_args(argv: list[str] | None = None) -> tuple[argparse.Namespace, list[str]]:
+def parse_gui_args(
+    argv: list[str] | None = None,
+) -> tuple[argparse.Namespace, list[str]]:
     """Parse command line arguments for the GUI application."""
     parser = argparse.ArgumentParser(
         description="Tech 2000 Inventory Price Updater GUI",
@@ -1397,7 +1379,6 @@ def main(argv: list[str] | None = None) -> int:
     window = MainWindow(demo=args.demo)
     window.show()
     return app.exec()
-
 
 
 if __name__ == "__main__":

@@ -21,7 +21,7 @@ uv sync
 cp .env.example .env
 ```
 
-Configure credentials in `.env`:
+Configure credentials in `.env` in the working directory, or save them from the GUI to the user configuration directory:
 
 ```sh
 MARCONE_USERNAME=your_username
@@ -57,11 +57,15 @@ Run code formatting and lint checks:
 
 ```sh
 uv run ruff check .
+uv run ruff format --check .
 ```
 
 ## Documentation
 
 - [inventory-updater](inventory_updater/README.md)
 - [marcone client](marcone/README.md)
+- [Contributing](CONTRIBUTING.md)
+- [Changelog](CHANGELOG.md)
+- [Security](SECURITY.md)
 
 
