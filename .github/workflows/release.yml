@@ -46,8 +46,13 @@ jobs:
           QT_QPA_PLATFORM: offscreen
         run: uv run pytest
 
+      - name: Install gh-cut
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh extension install kjiwa/gh-cut --pin d17eeca38dd7cdd01f0eecde2c5923487ea1ad80
+
       - name: Check tag matches project versions and changelog
-        run: sh scripts/check-release.sh "$GITHUB_REF_NAME"
+        run: gh cut check "$GITHUB_REF_NAME"
 
   build-macos:
     name: Build macOS (Apple Silicon)
@@ -185,8 +190,13 @@ jobs:
           name: windows-artifacts
           path: release-assets
 
+      - name: Install gh-cut
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh extension install kjiwa/gh-cut --pin d17eeca38dd7cdd01f0eecde2c5923487ea1ad80
+
       - name: Extract release notes
-        run: sh scripts/check-release.sh --notes "${GITHUB_REF_NAME#v}" > release-notes.md
+        run: gh cut notes "${GITHUB_REF_NAME#v}" > release-notes.md
 
       - name: Generate checksums
         run: |
