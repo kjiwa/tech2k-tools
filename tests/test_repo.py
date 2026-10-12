@@ -100,3 +100,16 @@ def test_no_tracked_file_names_a_real_home_directory():
             if match.group(1) != ALLOWED_USER:
                 offenders.append(f"{path.relative_to(ROOT)}: {match.group(0)}")
     assert offenders == []
+
+
+def test_ls_remote_checks_match_exact_ref():
+    lines = [
+        f"{script}: {line.strip()}"
+        for script in _shell_scripts()
+        for line in (ROOT / script).read_text().splitlines()
+        if "ls-remote" in line
+    ]
+    assert lines
+    for line in lines:
+        assert re.search(r'"refs/(tags|heads)/\$\w+"', line), line
+        assert "grep -Fxq" in line, line

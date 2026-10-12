@@ -90,7 +90,7 @@ _check_preconditions() {
     exit 1
   fi
 
-  if git -C "$REPO_ROOT" ls-remote --tags origin "$TAG" | grep -q "$TAG"; then
+  if git -C "$REPO_ROOT" ls-remote origin "refs/tags/$TAG" | cut -f2 | grep -Fxq "refs/tags/$TAG"; then
     echo "release: tag '$TAG' already exists on origin" >&2
     exit 1
   fi
@@ -171,7 +171,7 @@ _check_branch_absent() {
     echo "release: branch '$BRANCH' already exists locally" >&2
     exit 1
   fi
-  if git -C "$REPO_ROOT" ls-remote --heads origin "$BRANCH" | grep -q .; then
+  if git -C "$REPO_ROOT" ls-remote origin "refs/heads/$BRANCH" | cut -f2 | grep -Fxq "refs/heads/$BRANCH"; then
     echo "release: branch '$BRANCH' already exists on origin" >&2
     exit 1
   fi
