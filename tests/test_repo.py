@@ -102,14 +102,19 @@ def test_no_tracked_file_names_a_real_home_directory():
     assert offenders == []
 
 
-def test_ls_remote_checks_match_exact_ref():
-    lines = [
+def test_remote_ref_checks_use_full_refs():
+    calls = [
         f"{script}: {line.strip()}"
         for script in _shell_scripts()
         for line in (ROOT / script).read_text().splitlines()
-        if "ls-remote" in line
+        if "_remote_ref_exists " in line and "() {" not in line
     ]
-    assert lines
-    for line in lines:
-        assert re.search(r'"refs/(tags|heads)/\$\w+"', line), line
-        assert "grep -Fxq" in line, line
+    assert calls
+    for call in calls:
+        assert re.search(r'_remote_ref_exists "refs/(tags|heads)/\$\w+"', call), call
+
+
+def test_ls_remote_only_in_remote_ref_helper():
+    for script in _shell_scripts():
+        text = (ROOT / script).read_text()
+        assert text.count("ls-remote origin") == (1 if "_remote_ref_exists()" in text else 0), script

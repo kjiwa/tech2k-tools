@@ -62,6 +62,15 @@ _parse_args() {
   readonly DRY_RUN VERSION TAG BRANCH
 }
 
+# ls-remote matches patterns by trailing path component, so compare the full ref.
+_remote_ref_exists() {
+  _remote_ref_exists_out=$(git -C "$REPO_ROOT" ls-remote origin "$1") || {
+    echo "release: could not list refs on origin" >&2
+    exit 1
+  }
+  printf '%s\n' "$_remote_ref_exists_out" | cut -f2 | grep -Fxq "$1"
+}
+
 _check_preconditions() {
   sh "$REPO_ROOT/scripts/check-release.sh" --changelog "$TAG"
 
@@ -90,7 +99,7 @@ _check_preconditions() {
     exit 1
   fi
 
-  if git -C "$REPO_ROOT" ls-remote origin "refs/tags/$TAG" | cut -f2 | grep -Fxq "refs/tags/$TAG"; then
+  if _remote_ref_exists "refs/tags/$TAG"; then
     echo "release: tag '$TAG' already exists on origin" >&2
     exit 1
   fi
@@ -171,7 +180,7 @@ _check_branch_absent() {
     echo "release: branch '$BRANCH' already exists locally" >&2
     exit 1
   fi
-  if git -C "$REPO_ROOT" ls-remote origin "refs/heads/$BRANCH" | cut -f2 | grep -Fxq "refs/heads/$BRANCH"; then
+  if _remote_ref_exists "refs/heads/$BRANCH"; then
     echo "release: branch '$BRANCH' already exists on origin" >&2
     exit 1
   fi
