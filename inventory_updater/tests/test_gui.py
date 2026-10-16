@@ -1,4 +1,6 @@
+import gc
 import os
+import weakref
 from unittest.mock import MagicMock, patch
 
 import openpyxl
@@ -599,3 +601,11 @@ def test_main_window_grab_renders(qapp, tmp_path):
     out = tmp_path / "main_window.png"
     assert window.grab().save(str(out))
     assert out.stat().st_size > 0
+
+
+def test_main_window_not_leaked_by_signal_connections(qapp):
+    window = MainWindow()
+    ref = weakref.ref(window)
+    del window
+    gc.collect()
+    assert ref() is None
