@@ -959,11 +959,11 @@ class MainWindow(QMainWindow):
         content_layout.addLayout(grid)
         group_layout.addWidget(self.options_content)
 
-        self.supplier_combo.currentTextChanged.connect(lambda _: self._update_options_summary())
-        self.radio_new_file.toggled.connect(lambda _: self._update_options_summary())
-        self.limit_spin.valueChanged.connect(lambda _: self._update_options_summary())
-        self.cb_missing_only.toggled.connect(lambda _: self._update_options_summary())
-        self.cb_dry_run.toggled.connect(lambda _: self._update_options_summary())
+        self.supplier_combo.currentTextChanged.connect(self._update_options_summary)
+        self.radio_new_file.toggled.connect(self._update_options_summary)
+        self.limit_spin.valueChanged.connect(self._update_options_summary)
+        self.cb_missing_only.toggled.connect(self._update_options_summary)
+        self.cb_dry_run.toggled.connect(self._update_options_summary)
         self._update_options_summary()
 
         return options_group
@@ -979,7 +979,7 @@ class MainWindow(QMainWindow):
             self.options_toggle_btn.setText("▾  Update Options")
             self.options_summary_lbl.setVisible(False)
 
-    def _update_options_summary(self) -> None:
+    def _update_options_summary(self, *_args: Any) -> None:
         parts: list[str] = []
         supp = self.supplier_combo.currentText().strip()
         if not supp or supp == "(All Suppliers - No Filter)":
